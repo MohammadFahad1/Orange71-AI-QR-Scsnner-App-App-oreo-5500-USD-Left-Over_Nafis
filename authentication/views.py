@@ -36,13 +36,26 @@ from .serializers import (
     RingExchangeRequestCreateSerializer,
     RingExchangeRequestSerializer,
     RingExchangeTrackingUpdateSerializer,
+    RefundPolicySerializer,
+    RefundRequestCreateSerializer,
+    RefundRequestSerializer,
+    RefundTrackingUpdateSerializer,
 )
 from .woocommerce_client import get_wc_api
 from .order_serializers import OrderSerializer, SimpleOrderSerializer
 from .utils import fetch_users
 
 User = get_user_model()
-from .models import AmbassadorBooking, AmbassadorSlot, SpeacialEvent, Support, RingExchangePolicy, RingExchangeRequest
+from .models import (
+    AmbassadorBooking,
+    AmbassadorSlot,
+    SpeacialEvent,
+    Support,
+    RingExchangePolicy,
+    RingExchangeRequest,
+    RefundPolicy,
+    RefundRequest,
+)
 
 OTP_EXPIRY_MINUTES = 10
 AUTH_TAG = "Authentication"
@@ -1472,5 +1485,343 @@ class RingExchangeStripeWebhookAPIView(APIView):
             exchange.save(update_fields=["payment_status", "status", "stripe_payment_intent_id", "updated_at"])
 
         return Response({"detail": "ok"}, status=status.HTTP_200_OK)
+
+
+REFUND_TAG = "Refund"
+
+
+class RefundPolicyAPIView(APIView):
+    """
+    GET /api/auth/refund/policy/
+
+    Return active refund policy configuration (21-day deadline window, return shipping address, instructions).
+
+    Response Example (200 OK):
+    {
+        "refund_deadline_days": 21,
+        "return_shipping_address": "Amore Rings Returns Dept.\n123 Luxury Lane, Suite 100\nNew York, NY 10001, USA",
+        "instructions": "To return your ring for a refund, please package the item securely...",
+        "restocking_fee_percentage": "0.00",
+        "currency": "usd",
+        "updated_at": "2026-09-01T12:00:00Z"
+    }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=[REFUND_TAG],
+        summary="Get active refund policy",
+        description=(
+            "Returns the active refund policy details including return deadline window (default 21 days), "
+            "return shipping address, and instructions.\n\n"
+            "**Response Example (200 OK)**:\n"
+            "```json\n"
+            "{\n"
+            "  \"refund_deadline_days\": 21,\n"
+            "  \"return_shipping_address\": \"Amore Rings Returns Dept.\\n123 Luxury Lane, Suite 100\\nNew York, NY 10001, USA\",\n"
+            "  \"instructions\": \"To return your ring for a refund, please package the item securely in its original box and ship it to our returns department.\",\n"
+            "  \"restocking_fee_percentage\": \"0.00\",\n"
+            "  \"currency\": \"usd\",\n"
+            "  \"updated_at\": \"2026-09-01T12:00:00Z\"\n"
+            "}\n"
+            "```"
+        ),
+        responses=RefundPolicySerializer,
+    )
+    def get(self, request):
+        policy = RefundPolicy.get_policy()
+        serializer = RefundPolicySerializer(policy)
+        return Response(serializer.data)
+
+
+class RefundAPIView(APIView):
+    """
+    GET /api/auth/refund/
+    List all refund requests for the authenticated user.
+
+    POST /api/auth/refund/
+    Submit a new refund request. Auto-verifies WooCommerce order ownership & 21-day return deadline.
+
+    Request Example:
+    {
+        "order_id": "1001",
+        "item_name": "Amore Silver Ring",
+        "item_size": "7",
+        "reason": "Size didn't fit as expected",
+        "purchase_date": "2026-08-25T00:00:00Z",
+        "original_price": 5000
+    }
+
+    Response Example (201 Created):
+    {
+        "id": 1,
+        "order_id": "1001",
+        "item_name": "Amore Silver Ring",
+        "item_size": "7",
+        "reason": "Size didn't fit as expected",
+        "purchase_date": "2026-08-25T00:00:00Z",
+        "original_price": 5000,
+        "refund_amount": 5000,
+        "currency": "usd",
+        "return_deadline": "2026-09-15T00:00:00Z",
+        "is_eligible": true,
+        "user_tracking_number": null,
+        "status": "requested",
+        "notes": null,
+        "created_at": "2026-09-01T12:00:00Z",
+        "updated_at": "2026-09-01T12:00:00Z"
+    }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=[REFUND_TAG],
+        summary="List my refund requests",
+        description=(
+            "Returns all refund requests submitted by the authenticated user.\n\n"
+            "**Response Example (200 OK)**:\n"
+            "```json\n"
+            "[\n"
+            "  {\n"
+            "    \"id\": 1,\n"
+            "    \"order_id\": \"1001\",\n"
+            "    \"item_name\": \"Amore Silver Ring\",\n"
+            "    \"item_size\": \"7\",\n"
+            "    \"reason\": \"Size didn't fit as expected\",\n"
+            "    \"purchase_date\": \"2026-08-25T00:00:00Z\",\n"
+            "    \"original_price\": 5000,\n"
+            "    \"refund_amount\": 5000,\n"
+            "    \"currency\": \"usd\",\n"
+            "    \"return_deadline\": \"2026-09-15T00:00:00Z\",\n"
+            "    \"is_eligible\": true,\n"
+            "    \"user_tracking_number\": null,\n"
+            "    \"status\": \"requested\",\n"
+            "    \"notes\": null,\n"
+            "    \"created_at\": \"2026-09-01T12:00:00Z\",\n"
+            "    \"updated_at\": \"2026-09-01T12:00:00Z\"\n"
+            "  }\n"
+            "]\n"
+            "```"
+        ),
+        responses=RefundRequestSerializer(many=True),
+    )
+    def get(self, request):
+        requests = RefundRequest.objects.filter(user=request.user)
+        serializer = RefundRequestSerializer(requests, many=True)
+        return Response(serializer.data)
+
+    @extend_schema(
+        tags=[REFUND_TAG],
+        summary="Submit a refund request",
+        description=(
+            "Submits a request for a refund on a purchased item. "
+            "Auto-verifies WooCommerce order ownership and calculates deadline eligibility (21 days default).\n\n"
+            "**Request Example**:\n"
+            "```json\n"
+            "{\n"
+            "  \"order_id\": \"1001\",\n"
+            "  \"item_name\": \"Amore Silver Ring\",\n"
+            "  \"item_size\": \"7\",\n"
+            "  \"reason\": \"Item changed mind\",\n"
+            "  \"purchase_date\": \"2026-08-25T00:00:00Z\",\n"
+            "  \"original_price\": 5000\n"
+            "}\n"
+            "```\n\n"
+            "**Response Example (201 Created)**:\n"
+            "```json\n"
+            "{\n"
+            "  \"id\": 1,\n"
+            "  \"order_id\": \"1001\",\n"
+            "  \"item_name\": \"Amore Silver Ring\",\n"
+            "  \"item_size\": \"7\",\n"
+            "  \"reason\": \"Item changed mind\",\n"
+            "  \"purchase_date\": \"2026-08-25T00:00:00Z\",\n"
+            "  \"original_price\": 5000,\n"
+            "  \"refund_amount\": 5000,\n"
+            "  \"currency\": \"usd\",\n"
+            "  \"return_deadline\": \"2026-09-15T00:00:00Z\",\n"
+            "  \"is_eligible\": true,\n"
+            "  \"user_tracking_number\": null,\n"
+            "  \"status\": \"requested\",\n"
+            "  \"notes\": null,\n"
+            "  \"created_at\": \"2026-09-01T12:00:00Z\",\n"
+            "  \"updated_at\": \"2026-09-01T12:00:00Z\"\n"
+            "}\n"
+            "```"
+        ),
+        request=RefundRequestCreateSerializer,
+        responses=RefundRequestSerializer,
+    )
+    def post(self, request):
+        serializer = RefundRequestCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        policy = RefundPolicy.get_policy()
+
+        # Verify WooCommerce order ownership & auto-populate purchase_date and original_price
+        wc = get_wc_api()
+        wc_order = None
+        if wc:
+            orders_helper = CurrentUserOrdersAPIView()
+            user_orders = orders_helper._fetch_orders_for_email(wc, request.user.email)
+            for o in user_orders:
+                if str(o.get("id")) == str(data["order_id"]):
+                    wc_order = o
+                    break
+
+            if not wc_order and user_orders:
+                return Response(
+                    {"detail": f"Order #{data['order_id']} was not found under your account."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        if wc_order:
+            from django.utils.dateparse import parse_datetime
+            date_str = wc_order.get("date_created")
+            parsed_dt = parse_datetime(date_str) if date_str else None
+            purchase_date = parsed_dt or data.get("purchase_date") or timezone.now()
+
+            line_items = wc_order.get("line_items") or []
+            item_price_cents = 0
+            for li in line_items:
+                if data["item_name"].strip().lower() in (li.get("name") or "").strip().lower():
+                    price_val = float(li.get("price") or li.get("total") or 0)
+                    item_price_cents = int(price_val * 100)
+                    break
+            if item_price_cents == 0 and line_items:
+                price_val = float(line_items[0].get("price") or line_items[0].get("total") or 0)
+                item_price_cents = int(price_val * 100)
+
+            original_price = item_price_cents if item_price_cents > 0 else (data.get("original_price") or 0)
+        else:
+            purchase_date = data.get("purchase_date") or timezone.now()
+            original_price = data.get("original_price") or 0
+
+        calc = RefundRequest.calculate_refund(
+            policy=policy,
+            purchase_date=purchase_date,
+            original_price_cents=original_price,
+        )
+
+        refund_request = RefundRequest.objects.create(
+            user=request.user,
+            order_id=data["order_id"],
+            item_name=data["item_name"],
+            item_size=data.get("item_size"),
+            reason=data["reason"],
+            purchase_date=purchase_date,
+            original_price=original_price,
+            refund_amount=calc["refund_amount"],
+            currency=policy.currency,
+            return_deadline=calc["return_deadline"],
+            is_eligible=calc["is_eligible"],
+            status=RefundRequest.STATUS_REQUESTED,
+        )
+
+        res_serializer = RefundRequestSerializer(refund_request)
+        return Response(res_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class RefundDetailAPIView(APIView):
+    """
+    GET /api/auth/refund/<id>/
+    Retrieve refund request details.
+
+    PATCH /api/auth/refund/<id>/
+    Update return shipment tracking number.
+
+    Request Example (PATCH):
+    {
+        "user_tracking_number": "1Z9999999999999999"
+    }
+
+    Response Example (200 OK):
+    {
+        "id": 1,
+        "order_id": "1001",
+        "item_name": "Amore Silver Ring",
+        "status": "ring_shipped",
+        "user_tracking_number": "1Z9999999999999999",
+        "updated_at": "2026-09-01T12:10:00Z"
+    }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=[REFUND_TAG],
+        summary="Get refund request details",
+        description=(
+            "Returns details for a specific refund request.\n\n"
+            "**Response Example (200 OK)**:\n"
+            "```json\n"
+            "{\n"
+            "  \"id\": 1,\n"
+            "  \"order_id\": \"1001\",\n"
+            "  \"item_name\": \"Amore Silver Ring\",\n"
+            "  \"refund_amount\": 5000,\n"
+            "  \"is_eligible\": true,\n"
+            "  \"status\": \"requested\"\n"
+            "}\n"
+            "```"
+        ),
+        responses=RefundRequestSerializer,
+    )
+    def get(self, request, pk):
+        try:
+            refund = RefundRequest.objects.get(pk=pk, user=request.user)
+        except RefundRequest.DoesNotExist:
+            return Response(
+                {"detail": "Refund request not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        serializer = RefundRequestSerializer(refund)
+        return Response(serializer.data)
+
+    @extend_schema(
+        tags=[REFUND_TAG],
+        summary="Update return shipment tracking number",
+        description=(
+            "Allows the user to attach their return shipment tracking number once they ship the ring back.\n\n"
+            "**Request Example**:\n"
+            "```json\n"
+            "{\n"
+            "  \"user_tracking_number\": \"1Z9999999999999999\"\n"
+            "}\n"
+            "```\n\n"
+            "**Response Example (200 OK)**:\n"
+            "```json\n"
+            "{\n"
+            "  \"id\": 1,\n"
+            "  \"status\": \"ring_shipped\",\n"
+            "  \"user_tracking_number\": \"1Z9999999999999999\"\n"
+            "}\n"
+            "```"
+        ),
+        request=RefundTrackingUpdateSerializer,
+        responses=RefundRequestSerializer,
+    )
+    def patch(self, request, pk):
+        try:
+            refund = RefundRequest.objects.get(pk=pk, user=request.user)
+        except RefundRequest.DoesNotExist:
+            return Response(
+                {"detail": "Refund request not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = RefundTrackingUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        refund.user_tracking_number = serializer.validated_data["user_tracking_number"]
+        if refund.status in [RefundRequest.STATUS_REQUESTED]:
+            refund.status = RefundRequest.STATUS_RING_SHIPPED
+        refund.save(update_fields=["user_tracking_number", "status", "updated_at"])
+
+        res_serializer = RefundRequestSerializer(refund)
+        return Response(res_serializer.data)
 
 

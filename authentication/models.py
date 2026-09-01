@@ -316,3 +316,120 @@ class RingExchangeRequest(models.Model):
     def __str__(self):
         return f"RingExchangeRequest({self.user.email} - Order #{self.order_id})"
 
+
+class RefundPolicy(models.Model):
+    refund_deadline_days = models.PositiveIntegerField(
+        default=21,
+        help_text="Number of days from purchase date during which a refund can be requested (default: 21 days).",
+    )
+    return_shipping_address = models.TextField(
+        default="Amore Rings Returns Dept.\n123 Luxury Lane, Suite 100\nNew York, NY 10001, USA",
+        help_text="Address where customers should mail returned rings.",
+    )
+    instructions = models.TextField(
+        default="To return your ring for a refund, please package the item securely in its original box and ship it to our returns department. Attach your shipment tracking number to this request once mailed.",
+        help_text="Instructions displayed to customers when requesting a refund.",
+    )
+    restocking_fee_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0.00,
+        help_text="Optional restocking fee percentage (e.g. 0.00 for no fee).",
+    )
+    currency = models.CharField(max_length=10, default="usd")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Refund Policy"
+        verbose_name_plural = "Refund Policy"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_policy(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return f"Refund Policy ({self.refund_deadline_days} days deadline)"
+
+
+class RefundRequest(models.Model):
+    STATUS_REQUESTED = "requested"
+    STATUS_RING_SHIPPED = "ring_shipped"
+    STATUS_RING_RECEIVED = "ring_received"
+    STATUS_REFUND_PROCESSED = "refund_processed"
+    STATUS_REJECTED = "rejected"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = [
+        (STATUS_REQUESTED, "Requested"),
+        (STATUS_RING_SHIPPED, "Ring Shipped by User"),
+        (STATUS_RING_RECEIVED, "Ring Received by Company"),
+        (STATUS_REFUND_PROCESSED, "Refund Processed"),
+        (STATUS_REJECTED, "Rejected"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="refund_requests",
+    )
+    order_id = models.CharField(max_length=100)
+    item_name = models.CharField(max_length=255)
+    item_size = models.CharField(max_length=50, blank=True, null=True)
+    reason = models.TextField()
+    purchase_date = models.DateTimeField()
+    original_price = models.PositiveIntegerField(
+        default=0,
+        help_text="Original item purchase price in smallest currency unit (e.g. cents).",
+    )
+    refund_amount = models.PositiveIntegerField(
+        default=0,
+        help_text="Eligible refund amount in cents.",
+    )
+    currency = models.CharField(max_length=10, default="usd")
+    return_deadline = models.DateTimeField()
+    is_eligible = models.BooleanField(
+        default=True,
+        help_text="True if request was submitted within the refund deadline window.",
+    )
+    user_tracking_number = models.CharField(
+        max_length=100, blank=True, null=True
+    )
+    status = models.CharField(
+        max_length=30, choices=STATUS_CHOICES, default=STATUS_REQUESTED
+    )
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @classmethod
+    def calculate_refund(cls, policy, purchase_date, original_price_cents):
+        from datetime import timedelta
+        from django.utils import timezone
+        now = timezone.now()
+        deadline = purchase_date + timedelta(days=policy.refund_deadline_days)
+        is_eligible = now <= deadline
+
+        restocking_fee = int(original_price_cents * (float(policy.restocking_fee_percentage) / 100.0))
+        refund_amount = max(0, original_price_cents - restocking_fee)
+
+        return {
+            "is_eligible": is_eligible,
+            "return_deadline": deadline,
+            "original_price": original_price_cents,
+            "restocking_fee": restocking_fee,
+            "refund_amount": refund_amount,
+        }
+
+    def __str__(self):
+        return f"RefundRequest({self.user.email} - Order #{self.order_id})"
+
+

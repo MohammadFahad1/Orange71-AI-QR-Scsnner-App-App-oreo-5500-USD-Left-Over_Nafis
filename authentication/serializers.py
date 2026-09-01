@@ -7,10 +7,13 @@ from .models import (
     Support,
     RingExchangePolicy,
     RingExchangeRequest,
+    RefundPolicy,
+    RefundRequest,
 )
 
 
 User = get_user_model()
+
 
 
 class AmbassadorSlotSerializer(serializers.ModelSerializer):
@@ -180,4 +183,59 @@ class RingExchangeRequestSerializer(serializers.ModelSerializer):
 
 class RingExchangeTrackingUpdateSerializer(serializers.Serializer):
     user_tracking_number = serializers.CharField(max_length=100)
+
+
+class RefundPolicySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RefundPolicy
+        fields = (
+            'refund_deadline_days',
+            'return_shipping_address',
+            'instructions',
+            'restocking_fee_percentage',
+            'currency',
+            'updated_at',
+        )
+
+
+class RefundRequestCreateSerializer(serializers.Serializer):
+    order_id = serializers.CharField(max_length=100)
+    item_name = serializers.CharField(max_length=255)
+    item_size = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+    reason = serializers.CharField()
+    purchase_date = serializers.DateTimeField(required=False, allow_null=True)
+    original_price = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        min_value=0,
+        help_text="Original purchase price in smallest currency unit (e.g. cents). Optional if WooCommerce is connected.",
+    )
+
+
+class RefundRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RefundRequest
+        fields = (
+            'id',
+            'order_id',
+            'item_name',
+            'item_size',
+            'reason',
+            'purchase_date',
+            'original_price',
+            'refund_amount',
+            'currency',
+            'return_deadline',
+            'is_eligible',
+            'user_tracking_number',
+            'status',
+            'notes',
+            'created_at',
+            'updated_at',
+        )
+
+
+class RefundTrackingUpdateSerializer(serializers.Serializer):
+    user_tracking_number = serializers.CharField(max_length=100)
+
 

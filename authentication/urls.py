@@ -17,6 +17,9 @@ from .views import (
     RingExchangeAPIView,
     RingExchangeDetailAPIView,
     RingExchangeStripeWebhookAPIView,
+    RefundPolicyAPIView,
+    RefundAPIView,
+    RefundDetailAPIView,
 )
 
 
@@ -37,5 +40,8 @@ urlpatterns = [
     path('ring-exchange/', RingExchangeAPIView.as_view(), name='ring-exchange-list-create'),
     path('ring-exchange/<int:pk>/', RingExchangeDetailAPIView.as_view(), name='ring-exchange-detail'),
     path('ring-exchange/webhook/', RingExchangeStripeWebhookAPIView.as_view(), name='ring-exchange-webhook'),
+    path('refund/policy/', RefundPolicyAPIView.as_view(), name='refund-policy'),
+    path('refund/', RefundAPIView.as_view(), name='refund-list-create'),
+    path('refund/<int:pk>/', RefundDetailAPIView.as_view(), name='refund-detail'),
 ]
 

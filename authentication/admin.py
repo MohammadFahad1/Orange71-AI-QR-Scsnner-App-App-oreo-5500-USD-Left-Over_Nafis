@@ -10,7 +10,10 @@ from .models import (
     User,
     RingExchangePolicy,
     RingExchangeRequest,
+    RefundPolicy,
+    RefundRequest,
 )
+
 
 
 class AmbassadorBookingInline(admin.TabularInline):
@@ -137,4 +140,43 @@ class RingExchangeRequestAdmin(admin.ModelAdmin):
     search_fields = ('user__email', 'order_id', 'original_item_name', 'user_tracking_number', 'replacement_tracking_number')
     list_editable = ('status', 'replacement_tracking_number')
     ordering = ('-created_at',)
+
+
+@admin.register(RefundPolicy)
+class RefundPolicyAdmin(admin.ModelAdmin):
+    list_display = (
+        'refund_deadline_days',
+        'restocking_fee_percentage',
+        'currency',
+        'updated_at',
+    )
+
+    def has_add_permission(self, request):
+        if RefundPolicy.objects.exists():
+            return False
+        return super().has_add_permission(request)
+
+
+@admin.register(RefundRequest)
+class RefundRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'user',
+        'order_id',
+        'item_name',
+        'item_size',
+        'purchase_date',
+        'original_price',
+        'refund_amount',
+        'return_deadline',
+        'is_eligible',
+        'user_tracking_number',
+        'status',
+        'created_at',
+    )
+    list_filter = ('status', 'is_eligible', 'created_at')
+    search_fields = ('user__email', 'order_id', 'item_name', 'user_tracking_number')
+    list_editable = ('status',)
+    ordering = ('-created_at',)
+
 

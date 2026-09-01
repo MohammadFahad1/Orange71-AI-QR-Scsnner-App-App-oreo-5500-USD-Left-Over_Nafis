@@ -1,7 +1,13 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import AmbassadorBooking, AmbassadorSlot, Support
+from .models import (
+    AmbassadorBooking,
+    AmbassadorSlot,
+    Support,
+    RingExchangePolicy,
+    RingExchangeRequest,
+)
 
 
 User = get_user_model()
@@ -111,3 +117,67 @@ class UserUpdateSerializer(serializers.Serializer):
         if not attrs:
             raise serializers.ValidationError('At least one field must be provided.')
         return attrs
+
+
+class RingExchangePolicySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RingExchangePolicy
+        fields = (
+            'free_exchange_days',
+            'charge_type',
+            'fixed_fee_amount',
+            'fee_percentage',
+            'shipping_cost',
+            'currency',
+            'updated_at',
+        )
+
+
+class RingExchangeRequestCreateSerializer(serializers.Serializer):
+    order_id = serializers.CharField(max_length=100)
+    original_item_name = serializers.CharField(max_length=255)
+    original_size = serializers.CharField(max_length=50)
+    desired_size = serializers.CharField(max_length=50)
+    is_damaged = serializers.BooleanField(default=False)
+    purchase_date = serializers.DateTimeField(required=False, allow_null=True)
+    original_price = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        min_value=0,
+        help_text="Original item price in smallest currency unit (e.g. cents). Optional if WooCommerce is connected.",
+    )
+    success_url = serializers.URLField(required=False)
+    cancel_url = serializers.URLField(required=False)
+
+
+class RingExchangeRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RingExchangeRequest
+        fields = (
+            'id',
+            'order_id',
+            'original_item_name',
+            'original_size',
+            'desired_size',
+            'is_damaged',
+            'purchase_date',
+            'original_price',
+            'calculated_fee',
+            'shipping_cost',
+            'total_amount',
+            'currency',
+            'is_within_free_window',
+            'payment_status',
+            'stripe_session_id',
+            'status',
+            'user_tracking_number',
+            'replacement_tracking_number',
+            'notes',
+            'created_at',
+            'updated_at',
+        )
+
+
+class RingExchangeTrackingUpdateSerializer(serializers.Serializer):
+    user_tracking_number = serializers.CharField(max_length=100)
+

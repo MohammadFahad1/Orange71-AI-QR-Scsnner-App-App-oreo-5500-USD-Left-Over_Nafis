@@ -36,13 +36,21 @@ class OrderSerializer(serializers.Serializer):
 
 
 class SimpleItemSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False, allow_null=True)
+    product_id = serializers.IntegerField(required=False, allow_null=True)
     name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
     size = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    price = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    total = serializers.CharField(allow_blank=True, allow_null=True, required=False)
 
 
 class SimpleOrderSerializer(serializers.Serializer):
-
     id = serializers.IntegerField()
+    status = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    date_created = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    total = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    currency = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     membersip_type = serializers.CharField()
     member_since = serializers.DateTimeField()
     items = SimpleItemSerializer(many=True)
+

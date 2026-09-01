@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.core.exceptions import ValidationError
@@ -127,3 +128,191 @@ class Support(models.Model):
 
 	def __str__(self):
 		return f'{self.full_name} <{self.email}>'
+
+
+class RingExchangePolicy(models.Model):
+    CHARGE_TYPE_FIXED = "fixed"
+    CHARGE_TYPE_PERCENTAGE = "percentage"
+    CHARGE_TYPE_SHIPPING_ONLY = "shipping_only"
+    CHARGE_TYPE_CHOICES = [
+        (CHARGE_TYPE_FIXED, "Fixed Amount"),
+        (CHARGE_TYPE_PERCENTAGE, "Percentage of Ring Cost"),
+        (CHARGE_TYPE_SHIPPING_ONLY, "Shipping Cost Only"),
+    ]
+
+    free_exchange_days = models.PositiveIntegerField(
+        default=14,
+        help_text="Number of days from purchase date during which exchanges are free (if ring is not broken).",
+    )
+    charge_type = models.CharField(
+        max_length=20,
+        choices=CHARGE_TYPE_CHOICES,
+        default=CHARGE_TYPE_SHIPPING_ONLY,
+        help_text="How fee is calculated after free exchange window or if ring is broken.",
+    )
+    fixed_fee_amount = models.PositiveIntegerField(
+        default=0,
+        help_text="Fixed exchange fee amount in cents (e.g. 1500 = $15.00). Used when charge_type='fixed'.",
+    )
+    fee_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0.00,
+        help_text="Percentage of ring cost (e.g. 20.00 = 20%). Used when charge_type='percentage'.",
+    )
+    shipping_cost = models.PositiveIntegerField(
+        default=500,
+        help_text="Flat shipping fee in cents (e.g. 500 = $5.00). Added to fee or used when charge_type='shipping_only'.",
+    )
+    currency = models.CharField(max_length=10, default="usd")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Ring Exchange Policy"
+        verbose_name_plural = "Ring Exchange Policy"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_policy(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return f"Exchange Policy ({self.free_exchange_days} free days, type: {self.charge_type})"
+
+
+class RingExchangeRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_PAYMENT_PENDING = "payment_pending"
+    STATUS_APPROVED = "approved"
+    STATUS_USER_SHIPPED = "user_shipped"
+    STATUS_RING_RECEIVED = "ring_received"
+    STATUS_REPLACEMENT_SHIPPED = "replacement_shipped"
+    STATUS_COMPLETED = "completed"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_PAYMENT_PENDING, "Payment Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_USER_SHIPPED, "Original Ring Shipped by User"),
+        (STATUS_RING_RECEIVED, "Original Ring Received by Company"),
+        (STATUS_REPLACEMENT_SHIPPED, "Replacement Ring Shipped"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    PAYMENT_NOT_REQUIRED = "not_required"
+    PAYMENT_PENDING = "pending"
+    PAYMENT_PAID = "paid"
+    PAYMENT_FAILED = "failed"
+
+    PAYMENT_STATUS_CHOICES = [
+        (PAYMENT_NOT_REQUIRED, "Not Required"),
+        (PAYMENT_PENDING, "Pending"),
+        (PAYMENT_PAID, "Paid"),
+        (PAYMENT_FAILED, "Failed"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ring_exchanges",
+    )
+    order_id = models.CharField(max_length=100)
+    original_item_name = models.CharField(max_length=255)
+    original_size = models.CharField(max_length=50)
+    desired_size = models.CharField(max_length=50)
+    is_damaged = models.BooleanField(
+        default=False,
+        help_text="Check if the ring is broken or damaged.",
+    )
+    purchase_date = models.DateTimeField()
+    original_price = models.PositiveIntegerField(
+        default=0,
+        help_text="Original item price in smallest currency unit (e.g. cents).",
+    )
+    calculated_fee = models.PositiveIntegerField(
+        default=0,
+        help_text="Calculated exchange fee in cents.",
+    )
+    shipping_cost = models.PositiveIntegerField(
+        default=0,
+        help_text="Shipping cost portion in cents.",
+    )
+    total_amount = models.PositiveIntegerField(
+        default=0,
+        help_text="Total charge (fee + shipping) in cents.",
+    )
+    currency = models.CharField(max_length=10, default="usd")
+    is_within_free_window = models.BooleanField(default=True)
+    payment_status = models.CharField(
+        max_length=20,
+        choices=PAYMENT_STATUS_CHOICES,
+        default=PAYMENT_NOT_REQUIRED,
+    )
+    stripe_session_id = models.CharField(
+        max_length=255, blank=True, null=True, unique=True
+    )
+    stripe_payment_intent_id = models.CharField(
+        max_length=255, blank=True, null=True
+    )
+    status = models.CharField(
+        max_length=30, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+    user_tracking_number = models.CharField(
+        max_length=100, blank=True, null=True
+    )
+    replacement_tracking_number = models.CharField(
+        max_length=100, blank=True, null=True
+    )
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @classmethod
+    def calculate_exchange_fee(cls, policy, purchase_date, is_damaged, original_price_cents):
+        from django.utils import timezone
+        now = timezone.now()
+        days_passed = (now - purchase_date).days if purchase_date else 0
+        within_free_window = days_passed <= policy.free_exchange_days
+
+        is_free = within_free_window and (not is_damaged)
+
+        if is_free:
+            return {
+                "is_free": True,
+                "within_free_window": True,
+                "fee": 0,
+                "shipping": 0,
+                "total": 0,
+            }
+
+        fee = 0
+        if policy.charge_type == RingExchangePolicy.CHARGE_TYPE_FIXED:
+            fee = policy.fixed_fee_amount
+        elif policy.charge_type == RingExchangePolicy.CHARGE_TYPE_PERCENTAGE:
+            fee = int(original_price_cents * (float(policy.fee_percentage) / 100.0))
+        elif policy.charge_type == RingExchangePolicy.CHARGE_TYPE_SHIPPING_ONLY:
+            fee = 0
+
+        shipping = policy.shipping_cost
+        total = fee + shipping
+
+        return {
+            "is_free": total == 0,
+            "within_free_window": within_free_window,
+            "fee": fee,
+            "shipping": shipping,
+            "total": total,
+        }
+
+    def __str__(self):
+        return f"RingExchangeRequest({self.user.email} - Order #{self.order_id})"
+

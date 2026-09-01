@@ -2,7 +2,15 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils import timezone
 
-from .models import AmbassadorBooking, AmbassadorSlot, SpeacialEvent, Support, User
+from .models import (
+    AmbassadorBooking,
+    AmbassadorSlot,
+    SpeacialEvent,
+    Support,
+    User,
+    RingExchangePolicy,
+    RingExchangeRequest,
+)
 
 
 class AmbassadorBookingInline(admin.TabularInline):
@@ -85,3 +93,48 @@ class SupportAdmin(admin.ModelAdmin):
 	list_display = ('full_name', 'email', 'created_at')
 	search_fields = ('full_name', 'email', 'how_can_i_help_you')
 	ordering = ('-created_at',)
+
+
+@admin.register(RingExchangePolicy)
+class RingExchangePolicyAdmin(admin.ModelAdmin):
+    list_display = (
+        'free_exchange_days',
+        'charge_type',
+        'fixed_fee_amount',
+        'fee_percentage',
+        'shipping_cost',
+        'currency',
+        'updated_at',
+    )
+
+    def has_add_permission(self, request):
+        if RingExchangePolicy.objects.exists():
+            return False
+        return super().has_add_permission(request)
+
+
+@admin.register(RingExchangeRequest)
+class RingExchangeRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'user',
+        'order_id',
+        'original_item_name',
+        'original_size',
+        'desired_size',
+        'is_damaged',
+        'is_within_free_window',
+        'calculated_fee',
+        'shipping_cost',
+        'total_amount',
+        'payment_status',
+        'status',
+        'user_tracking_number',
+        'replacement_tracking_number',
+        'created_at',
+    )
+    list_filter = ('status', 'payment_status', 'is_damaged', 'is_within_free_window', 'created_at')
+    search_fields = ('user__email', 'order_id', 'original_item_name', 'user_tracking_number', 'replacement_tracking_number')
+    list_editable = ('status', 'replacement_tracking_number')
+    ordering = ('-created_at',)
+

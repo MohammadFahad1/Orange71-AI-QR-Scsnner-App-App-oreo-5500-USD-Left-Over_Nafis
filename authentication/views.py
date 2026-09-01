@@ -32,13 +32,17 @@ from .serializers import (
     UserSerializer,
     VerifyOtpSerializer,
     UserUpdateSerializer,
+    RingExchangePolicySerializer,
+    RingExchangeRequestCreateSerializer,
+    RingExchangeRequestSerializer,
+    RingExchangeTrackingUpdateSerializer,
 )
 from .woocommerce_client import get_wc_api
 from .order_serializers import OrderSerializer, SimpleOrderSerializer
 from .utils import fetch_users
 
 User = get_user_model()
-from .models import AmbassadorBooking, AmbassadorSlot, SpeacialEvent, Support
+from .models import AmbassadorBooking, AmbassadorSlot, SpeacialEvent, Support, RingExchangePolicy, RingExchangeRequest
 
 OTP_EXPIRY_MINUTES = 10
 AUTH_TAG = "Authentication"
@@ -437,14 +441,67 @@ class SupportAPIView(APIView):
 
 
 class CurrentUserOrdersAPIView(APIView):
-    """Return the current user's WooCommerce orders and their items."""
+    """
+    GET /api/auth/membership-status/
+
+    Return the current user's WooCommerce orders and detailed line items.
+
+    Response Example (200 OK):
+    [
+        {
+            "id": 1001,
+            "status": "completed",
+            "date_created": "2026-08-20T10:00:00Z",
+            "total": "99.00",
+            "currency": "USD",
+            "membersip_type": "member",
+            "member_since": "2026-05-22T03:07:33Z",
+            "items": [
+                {
+                    "id": 501,
+                    "product_id": 12,
+                    "name": "Amore Silver Ring",
+                    "size": "7",
+                    "price": "99.00",
+                    "total": "99.00"
+                }
+            ]
+        }
+    ]
+    """
 
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
         tags=["Membership Status"],
         summary="Get membership status",
-        description="Returns the authenticated user membership status from the configured WooCommerce store.",
+        description=(
+            "Returns the authenticated user membership status and detailed WooCommerce order line items.\n\n"
+            "**Response Format Example (200 OK)**:\n"
+            "```json\n"
+            "[\n"
+            "  {\n"
+            "    \"id\": 1001,\n"
+            "    \"status\": \"completed\",\n"
+            "    \"date_created\": \"2026-08-20T10:00:00Z\",\n"
+            "    \"total\": \"99.00\",\n"
+            "    \"currency\": \"USD\",\n"
+            "    \"membersip_type\": \"member\",\n"
+            "    \"member_since\": \"2026-05-22T03:07:33Z\",\n"
+            "    \"items\": [\n"
+            "      {\n"
+            "        \"id\": 501,\n"
+            "        \"product_id\": 12,\n"
+            "        \"name\": \"Amore Silver Ring\",\n"
+            "        \"size\": \"7\",\n"
+            "        \"price\": \"99.00\",\n"
+            "        \"total\": \"99.00\"\n"
+            "      }\n"
+            "    ]\n"
+            "  }\n"
+            "]\n"
+            "```"
+        ),
         responses=SimpleOrderSerializer(many=True),
     )
     def get(self, request):
@@ -460,46 +517,34 @@ class CurrentUserOrdersAPIView(APIView):
         orders = self._fetch_orders_for_email(wc, email)
         product_cache = {}
 
-        # Normalize response into our serializer format
-        normalized = []
-        for o in orders:
-            order_sizes = []
-            normalized.append({
-                "id": o.get("id"),
-                "status": o.get("status"),
-                "total": o.get("total"),
-                "currency": o.get("currency"),
-                "date_created": o.get("date_created"),
-                "sizes": order_sizes,
-                "line_items": [
-                    {
-                        "id": li.get("id"),
-                        "name": li.get("name"),
-                        "product_id": li.get("product_id"),
-                        "quantity": li.get("quantity"),
-                        "total": li.get("total"),
-                    }
-                    for li in o.get("line_items", [])
-                ],
-            })
-
-            for line_item in normalized[-1]["line_items"]:
-                item_details = line_item.get("item_details") or {}
-                line_item["size"] = item_details.get("size")
-                if item_details.get("size") and item_details["size"] not in order_sizes:
-                    order_sizes.append(item_details["size"])
-
-        # Simplify output: only return each item's name and size
+        # Build enriched order details
         simplified = []
-        for o in normalized:
+        for o in orders:
             items = []
             for li in o.get("line_items", []):
+                size = None
+                meta_data = li.get("meta_data") or []
+                for m in meta_data:
+                    key = (m.get("display_key") or m.get("key") or "").strip().lower()
+                    if key in {"size", "pa_size", "_size", "select size"}:
+                        size = m.get("value")
+                        break
+
                 items.append({
+                    "id": li.get("id"),
+                    "product_id": li.get("product_id"),
                     "name": li.get("name"),
-                    "size": li.get("size"),
+                    "size": size,
+                    "price": str(li.get("price") or li.get("total") or "0"),
+                    "total": str(li.get("total") or "0"),
                 })
+
             simplified.append({
                 "id": o.get("id"),
+                "status": o.get("status"),
+                "date_created": o.get("date_created"),
+                "total": str(o.get("total") or "0"),
+                "currency": o.get("currency", "USD"),
                 "items": items,
                 "membersip_type": request.user.account_type,
                 "member_since": request.user.date_joined,
@@ -843,3 +888,510 @@ class AmbassadorQRCodeAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return FileResponse(booking.brand_qr.open("rb"), content_type="image/png")
+
+
+RING_EXCHANGE_TAG = "Ring Exchange"
+
+
+class RingExchangePolicyAPIView(APIView):
+    """
+    GET /api/auth/ring-exchange/policy/
+
+    Return current dynamic ring exchange policy.
+
+    Response Example (200 OK):
+    {
+        "free_exchange_days": 14,
+        "charge_type": "shipping_only",
+        "fixed_fee_amount": 1500,
+        "fee_percentage": "20.00",
+        "shipping_cost": 500,
+        "currency": "usd",
+        "updated_at": "2026-09-01T12:00:00Z"
+    }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=[RING_EXCHANGE_TAG],
+        summary="Get active ring exchange policy",
+        description=(
+            "Returns the current dynamic ring exchange policy (free exchange days window, fee rules, shipping cost).\n\n"
+            "**Response Example (200 OK)**:\n"
+            "```json\n"
+            "{\n"
+            "  \"free_exchange_days\": 14,\n"
+            "  \"charge_type\": \"shipping_only\",\n"
+            "  \"fixed_fee_amount\": 1500,\n"
+            "  \"fee_percentage\": \"20.00\",\n"
+            "  \"shipping_cost\": 500,\n"
+            "  \"currency\": \"usd\",\n"
+            "  \"updated_at\": \"2026-09-01T12:00:00Z\"\n"
+            "}\n"
+            "```"
+        ),
+        responses=RingExchangePolicySerializer,
+    )
+    def get(self, request):
+        policy = RingExchangePolicy.get_policy()
+        serializer = RingExchangePolicySerializer(policy)
+        return Response(serializer.data)
+
+
+class RingExchangeAPIView(APIView):
+    """
+    GET /api/auth/ring-exchange/
+    List all ring exchange requests for the authenticated user.
+
+    POST /api/auth/ring-exchange/
+    Submit a ring exchange request. Auto-verifies order ownership with WooCommerce.
+
+    Request Example:
+    {
+        "order_id": "1001",
+        "original_item_name": "Amore Silver Ring",
+        "original_size": "7",
+        "desired_size": "8",
+        "is_damaged": false,
+        "purchase_date": "2026-08-28T00:00:00Z",
+        "original_price": 5000
+    }
+
+    Response Example (201 Created - Free):
+    {
+        "id": 1,
+        "order_id": "1001",
+        "original_item_name": "Amore Silver Ring",
+        "original_size": "7",
+        "desired_size": "8",
+        "is_damaged": false,
+        "purchase_date": "2026-08-28T00:00:00Z",
+        "original_price": 5000,
+        "calculated_fee": 0,
+        "shipping_cost": 0,
+        "total_amount": 0,
+        "currency": "usd",
+        "is_within_free_window": true,
+        "payment_status": "not_required",
+        "stripe_session_id": null,
+        "status": "approved",
+        "user_tracking_number": null,
+        "replacement_tracking_number": null,
+        "notes": null,
+        "created_at": "2026-09-01T12:00:00Z",
+        "updated_at": "2026-09-01T12:00:00Z"
+    }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=[RING_EXCHANGE_TAG],
+        summary="List my ring exchange requests",
+        description=(
+            "Returns all ring exchange requests submitted by the authenticated user.\n\n"
+            "**Response Example (200 OK)**:\n"
+            "```json\n"
+            "[\n"
+            "  {\n"
+            "    \"id\": 1,\n"
+            "    \"order_id\": \"1001\",\n"
+            "    \"original_item_name\": \"Amore Silver Ring\",\n"
+            "    \"original_size\": \"7\",\n"
+            "    \"desired_size\": \"8\",\n"
+            "    \"is_damaged\": false,\n"
+            "    \"purchase_date\": \"2026-08-28T00:00:00Z\",\n"
+            "    \"original_price\": 5000,\n"
+            "    \"calculated_fee\": 0,\n"
+            "    \"shipping_cost\": 0,\n"
+            "    \"total_amount\": 0,\n"
+            "    \"currency\": \"usd\",\n"
+            "    \"is_within_free_window\": true,\n"
+            "    \"payment_status\": \"not_required\",\n"
+            "    \"stripe_session_id\": null,\n"
+            "    \"status\": \"approved\",\n"
+            "    \"user_tracking_number\": null,\n"
+            "    \"replacement_tracking_number\": null,\n"
+            "    \"notes\": null,\n"
+            "    \"created_at\": \"2026-09-01T12:00:00Z\",\n"
+            "    \"updated_at\": \"2026-09-01T12:00:00Z\"\n"
+            "  }\n"
+            "]\n"
+            "```"
+        ),
+        responses=RingExchangeRequestSerializer(many=True),
+    )
+    def get(self, request):
+        requests = RingExchangeRequest.objects.filter(user=request.user)
+        serializer = RingExchangeRequestSerializer(requests, many=True)
+        return Response(serializer.data)
+
+    @extend_schema(
+        tags=[RING_EXCHANGE_TAG],
+        summary="Submit a ring exchange request",
+        description=(
+            "Submits a request to exchange a ring for a new size. "
+            "Auto-verifies order ownership with WooCommerce and calculates fees based on policy.\n\n"
+            "**Request Example**:\n"
+            "```json\n"
+            "{\n"
+            "  \"order_id\": \"1001\",\n"
+            "  \"original_item_name\": \"Amore Silver Ring\",\n"
+            "  \"original_size\": \"7\",\n"
+            "  \"desired_size\": \"8\",\n"
+            "  \"is_damaged\": false,\n"
+            "  \"purchase_date\": \"2026-08-28T00:00:00Z\",\n"
+            "  \"original_price\": 5000\n"
+            "}\n"
+            "```\n\n"
+            "**Response Example (Payment Required)**:\n"
+            "```json\n"
+            "{\n"
+            "  \"id\": 2,\n"
+            "  \"order_id\": \"1001\",\n"
+            "  \"original_item_name\": \"Amore Silver Ring\",\n"
+            "  \"original_size\": \"7\",\n"
+            "  \"desired_size\": \"8\",\n"
+            "  \"is_damaged\": true,\n"
+            "  \"purchase_date\": \"2026-08-28T00:00:00Z\",\n"
+            "  \"original_price\": 5000,\n"
+            "  \"calculated_fee\": 1000,\n"
+            "  \"shipping_cost\": 500,\n"
+            "  \"total_amount\": 1500,\n"
+            "  \"currency\": \"usd\",\n"
+            "  \"is_within_free_window\": true,\n"
+            "  \"payment_status\": \"pending\",\n"
+            "  \"stripe_session_id\": \"cs_test_a1b2c3\",\n"
+            "  \"stripe_checkout_url\": \"https://checkout.stripe.com/c/pay/cs_test_a1b2c3\",\n"
+            "  \"status\": \"payment_pending\",\n"
+            "  \"user_tracking_number\": null,\n"
+            "  \"replacement_tracking_number\": null,\n"
+            "  \"notes\": null,\n"
+            "  \"created_at\": \"2026-09-01T12:00:00Z\",\n"
+            "  \"updated_at\": \"2026-09-01T12:00:00Z\"\n"
+            "}\n"
+            "```"
+        ),
+        request=RingExchangeRequestCreateSerializer,
+        responses=RingExchangeRequestSerializer,
+    )
+    def post(self, request):
+        import stripe
+        serializer = RingExchangeRequestCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        policy = RingExchangePolicy.get_policy()
+        is_damaged = data["is_damaged"]
+
+        # Verify WooCommerce order ownership & auto-populate purchase_date and original_price
+        wc = get_wc_api()
+        wc_order = None
+        if wc:
+            orders_helper = CurrentUserOrdersAPIView()
+            user_orders = orders_helper._fetch_orders_for_email(wc, request.user.email)
+            for o in user_orders:
+                if str(o.get("id")) == str(data["order_id"]):
+                    wc_order = o
+                    break
+
+            if not wc_order and user_orders:
+                return Response(
+                    {"detail": f"Order #{data['order_id']} was not found under your account."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        if wc_order:
+            from django.utils.dateparse import parse_datetime
+            date_str = wc_order.get("date_created")
+            parsed_dt = parse_datetime(date_str) if date_str else None
+            purchase_date = parsed_dt or data.get("purchase_date") or timezone.now()
+
+            line_items = wc_order.get("line_items") or []
+            item_price_cents = 0
+            for li in line_items:
+                if data["original_item_name"].strip().lower() in (li.get("name") or "").strip().lower():
+                    price_val = float(li.get("price") or li.get("total") or 0)
+                    item_price_cents = int(price_val * 100)
+                    break
+            if item_price_cents == 0 and line_items:
+                price_val = float(line_items[0].get("price") or line_items[0].get("total") or 0)
+                item_price_cents = int(price_val * 100)
+
+            original_price = item_price_cents if item_price_cents > 0 else (data.get("original_price") or 0)
+        else:
+            purchase_date = data.get("purchase_date") or timezone.now()
+            original_price = data.get("original_price") or 0
+
+        fee_calc = RingExchangeRequest.calculate_exchange_fee(
+            policy=policy,
+            purchase_date=purchase_date,
+            is_damaged=is_damaged,
+            original_price_cents=original_price,
+        )
+
+        stripe_session_id = None
+        stripe_url = None
+        payment_status = RingExchangeRequest.PAYMENT_NOT_REQUIRED
+        initial_status = RingExchangeRequest.STATUS_APPROVED
+
+        if not fee_calc["is_free"]:
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+            if not stripe.api_key:
+                return Response(
+                    {"detail": "Stripe payment service is not configured."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+            success_url = data.get("success_url") or "https://example.com/exchange/success"
+            cancel_url = data.get("cancel_url") or "https://example.com/exchange/cancel"
+
+            line_items = []
+            if fee_calc["fee"] > 0:
+                line_items.append({
+                    "price_data": {
+                        "currency": policy.currency,
+                        "product_data": {
+                            "name": f"Ring Exchange Fee ({data['original_item_name']})",
+                        },
+                        "unit_amount": fee_calc["fee"],
+                    },
+                    "quantity": 1,
+                })
+            if fee_calc["shipping"] > 0:
+                line_items.append({
+                    "price_data": {
+                        "currency": policy.currency,
+                        "product_data": {
+                            "name": "Exchange Shipping Fee",
+                        },
+                        "unit_amount": fee_calc["shipping"],
+                    },
+                    "quantity": 1,
+                })
+
+            try:
+                session = stripe.checkout.Session.create(
+                    payment_method_types=["card"],
+                    line_items=line_items,
+                    mode="payment",
+                    success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
+                    cancel_url=cancel_url,
+                    client_reference_id=str(request.user.id),
+                    metadata={
+                        "type": "ring_exchange",
+                        "user_id": str(request.user.id),
+                        "order_id": str(data["order_id"]),
+                    },
+                )
+                stripe_session_id = session.id
+                stripe_url = session.url
+                payment_status = RingExchangeRequest.PAYMENT_PENDING
+                initial_status = RingExchangeRequest.STATUS_PAYMENT_PENDING
+            except Exception as exc:
+                return Response(
+                    {"detail": f"Stripe error: {exc}"},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+        exchange_request = RingExchangeRequest.objects.create(
+            user=request.user,
+            order_id=data["order_id"],
+            original_item_name=data["original_item_name"],
+            original_size=data["original_size"],
+            desired_size=data["desired_size"],
+            is_damaged=is_damaged,
+            purchase_date=purchase_date,
+            original_price=original_price,
+            calculated_fee=fee_calc["fee"],
+            shipping_cost=fee_calc["shipping"],
+            total_amount=fee_calc["total"],
+            currency=policy.currency,
+            is_within_free_window=fee_calc["within_free_window"],
+            payment_status=payment_status,
+            stripe_session_id=stripe_session_id,
+            status=initial_status,
+        )
+
+        res_serializer = RingExchangeRequestSerializer(exchange_request)
+        response_data = res_serializer.data
+        if stripe_url:
+            response_data["stripe_checkout_url"] = stripe_url
+
+        return Response(response_data, status=status.HTTP_201_CREATED)
+
+
+class RingExchangeDetailAPIView(APIView):
+    """
+    GET /api/auth/ring-exchange/<id>/
+    Retrieve single ring exchange request details.
+
+    PATCH /api/auth/ring-exchange/<id>/
+    Update return shipment tracking number.
+
+    Request Example (PATCH):
+    {
+        "user_tracking_number": "1Z9999999999999999"
+    }
+
+    Response Example (200 OK):
+    {
+        "id": 1,
+        "order_id": "1001",
+        "original_item_name": "Amore Silver Ring",
+        "original_size": "7",
+        "desired_size": "8",
+        "status": "user_shipped",
+        "user_tracking_number": "1Z9999999999999999",
+        "replacement_tracking_number": null,
+        "created_at": "2026-09-01T12:00:00Z",
+        "updated_at": "2026-09-01T12:10:00Z"
+    }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=[RING_EXCHANGE_TAG],
+        summary="Get ring exchange request details",
+        description=(
+            "Returns details for a specific ring exchange request.\n\n"
+            "**Response Example (200 OK)**:\n"
+            "```json\n"
+            "{\n"
+            "  \"id\": 1,\n"
+            "  \"order_id\": \"1001\",\n"
+            "  \"original_item_name\": \"Amore Silver Ring\",\n"
+            "  \"original_size\": \"7\",\n"
+            "  \"desired_size\": \"8\",\n"
+            "  \"is_damaged\": false,\n"
+            "  \"status\": \"approved\"\n"
+            "}\n"
+            "```"
+        ),
+        responses=RingExchangeRequestSerializer,
+    )
+    def get(self, request, pk):
+        try:
+            exchange = RingExchangeRequest.objects.get(pk=pk, user=request.user)
+        except RingExchangeRequest.DoesNotExist:
+            return Response(
+                {"detail": "Ring exchange request not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        serializer = RingExchangeRequestSerializer(exchange)
+        return Response(serializer.data)
+
+    @extend_schema(
+        tags=[RING_EXCHANGE_TAG],
+        summary="Update return shipment tracking number",
+        description=(
+            "Allows the user to attach their return tracking number once they ship the original ring back.\n\n"
+            "**Request Example**:\n"
+            "```json\n"
+            "{\n"
+            "  \"user_tracking_number\": \"1Z9999999999999999\"\n"
+            "}\n"
+            "```\n\n"
+            "**Response Example (200 OK)**:\n"
+            "```json\n"
+            "{\n"
+            "  \"id\": 1,\n"
+            "  \"status\": \"user_shipped\",\n"
+            "  \"user_tracking_number\": \"1Z9999999999999999\"\n"
+            "}\n"
+            "```"
+        ),
+        request=RingExchangeTrackingUpdateSerializer,
+        responses=RingExchangeRequestSerializer,
+    )
+    def patch(self, request, pk):
+        try:
+            exchange = RingExchangeRequest.objects.get(pk=pk, user=request.user)
+        except RingExchangeRequest.DoesNotExist:
+            return Response(
+                {"detail": "Ring exchange request not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = RingExchangeTrackingUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        exchange.user_tracking_number = serializer.validated_data["user_tracking_number"]
+        if exchange.status in [RingExchangeRequest.STATUS_APPROVED, RingExchangeRequest.STATUS_PENDING]:
+            exchange.status = RingExchangeRequest.STATUS_USER_SHIPPED
+        exchange.save(update_fields=["user_tracking_number", "status", "updated_at"])
+
+        res_serializer = RingExchangeRequestSerializer(exchange)
+        return Response(res_serializer.data)
+
+
+class RingExchangeStripeWebhookAPIView(APIView):
+    """
+    POST /api/auth/ring-exchange/webhook/
+
+    Processes Stripe webhook events for ring exchange payments.
+
+    Response Example (200 OK):
+    {
+        "detail": "ok"
+    }
+    """
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=[RING_EXCHANGE_TAG],
+        summary="Ring Exchange Stripe webhook callback",
+        description="Processes Stripe webhook events for ring exchange payments.",
+        request=None,
+        responses=None,
+    )
+    def post(self, request):
+        import stripe
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+        payload = request.body
+        sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
+
+        if not webhook_secret:
+            return Response(
+                {"detail": "Webhook secret not configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            event = stripe.Webhook.construct_event(
+                payload=payload, sig_header=sig_header, secret=webhook_secret
+            )
+        except ValueError:
+            return Response({"detail": "Invalid payload."}, status=status.HTTP_400_BAD_REQUEST)
+        except stripe.error.SignatureVerificationError:
+            return Response({"detail": "Invalid signature."}, status=status.HTTP_400_BAD_REQUEST)
+
+        event_type = event.get("type")
+        data_object = event.get("data", {}).get("object", {})
+
+        if event_type == "checkout.session.completed":
+            session_id = data_object.get("id")
+            payment_intent = data_object.get("payment_intent")
+            if not session_id:
+                return Response({"detail": "Missing session id."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                exchange = RingExchangeRequest.objects.get(stripe_session_id=session_id)
+            except RingExchangeRequest.DoesNotExist:
+                return Response({"detail": "Not a ring exchange session."}, status=status.HTTP_200_OK)
+
+            if exchange.payment_status == RingExchangeRequest.PAYMENT_PAID:
+                return Response({"detail": "Already completed."}, status=status.HTTP_200_OK)
+
+            exchange.payment_status = RingExchangeRequest.PAYMENT_PAID
+            exchange.status = RingExchangeRequest.STATUS_APPROVED
+            exchange.stripe_payment_intent_id = payment_intent
+            exchange.save(update_fields=["payment_status", "status", "stripe_payment_intent_id", "updated_at"])
+
+        return Response({"detail": "ok"}, status=status.HTTP_200_OK)
+
+

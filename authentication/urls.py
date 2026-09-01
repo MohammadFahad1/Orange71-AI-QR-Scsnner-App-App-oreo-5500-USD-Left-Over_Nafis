@@ -13,6 +13,10 @@ from .views import (
     SpeacialEventAPIView,
     SupportAPIView,
     VerifyOtpAPIView,
+    RingExchangePolicyAPIView,
+    RingExchangeAPIView,
+    RingExchangeDetailAPIView,
+    RingExchangeStripeWebhookAPIView,
 )
 
 
@@ -29,4 +33,9 @@ urlpatterns = [
     path('ambassador/book/', AmbassadorBookingAPIView.as_view(), name='ambassador-book'),
     path('ambassador/booking/', CurrentAmbassadorBookingAPIView.as_view(), name='ambassador-booking'),
     path('ambassador/me/qr/', AmbassadorQRCodeAPIView.as_view(), name='ambassador-me-qr'),
+    path('ring-exchange/policy/', RingExchangePolicyAPIView.as_view(), name='ring-exchange-policy'),
+    path('ring-exchange/', RingExchangeAPIView.as_view(), name='ring-exchange-list-create'),
+    path('ring-exchange/<int:pk>/', RingExchangeDetailAPIView.as_view(), name='ring-exchange-detail'),
+    path('ring-exchange/webhook/', RingExchangeStripeWebhookAPIView.as_view(), name='ring-exchange-webhook'),
 ]
+

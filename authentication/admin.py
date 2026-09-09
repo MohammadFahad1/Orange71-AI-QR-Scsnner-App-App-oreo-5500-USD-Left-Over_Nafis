@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils import timezone
+from django.contrib.auth.models import Group
 
 from .models import (
     AmbassadorBooking,
@@ -14,7 +15,7 @@ from .models import (
     RefundRequest,
 )
 
-
+admin.site.unregister(Group)
 
 class AmbassadorBookingInline(admin.TabularInline):
     model = AmbassadorBooking

@@ -38,10 +38,10 @@ urlpatterns = [
     path('ambassador/me/qr/', AmbassadorQRCodeAPIView.as_view(), name='ambassador-me-qr'),
     path('ring-exchange/policy/', RingExchangePolicyAPIView.as_view(), name='ring-exchange-policy'),
     path('ring-exchange/', RingExchangeAPIView.as_view(), name='ring-exchange-list-create'),
-    path('ring-exchange/<int:pk>/', RingExchangeDetailAPIView.as_view(), name='ring-exchange-detail'),
+    # path('ring-exchange/<int:pk>/', RingExchangeDetailAPIView.as_view(), name='ring-exchange-detail'),
     path('ring-exchange/webhook/', RingExchangeStripeWebhookAPIView.as_view(), name='ring-exchange-webhook'),
     path('refund/policy/', RefundPolicyAPIView.as_view(), name='refund-policy'),
     path('refund/', RefundAPIView.as_view(), name='refund-list-create'),
-    path('refund/<int:pk>/', RefundDetailAPIView.as_view(), name='refund-detail'),
+    # path('refund/<int:pk>/', RefundDetailAPIView.as_view(), name='refund-detail'),
 ]
 

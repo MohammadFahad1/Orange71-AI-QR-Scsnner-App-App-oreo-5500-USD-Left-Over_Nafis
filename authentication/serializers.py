@@ -1,4 +1,6 @@
+import datetime
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
@@ -186,6 +188,12 @@ class RingExchangeTrackingUpdateSerializer(serializers.Serializer):
 
 
 class RefundPolicySerializer(serializers.ModelSerializer):
+    user_purchase_date = serializers.SerializerMethodField()
+    user_refund_deadline = serializers.SerializerMethodField()
+    refund_deadline_date = serializers.SerializerMethodField()
+    return_deadline = serializers.SerializerMethodField()
+    is_eligible = serializers.SerializerMethodField()
+
     class Meta:
         model = RefundPolicy
         fields = (
@@ -195,7 +203,52 @@ class RefundPolicySerializer(serializers.ModelSerializer):
             'restocking_fee_percentage',
             'currency',
             'updated_at',
+            'user_purchase_date',
+            'user_refund_deadline',
+            'refund_deadline_date',
+            'return_deadline',
+            'is_eligible',
         )
+
+    def _get_user_purchase_info(self, obj):
+        if not hasattr(self, '_cached_purchase_info'):
+            request = self.context.get('request')
+            if request and getattr(request, 'user', None) and request.user.is_authenticated:
+                from .views import get_user_ring_purchase_date
+                order_id = request.query_params.get('order_id') if hasattr(request, 'query_params') else None
+                self._cached_purchase_info = get_user_ring_purchase_date(request.user, order_id=order_id)
+            else:
+                self._cached_purchase_info = None
+        return self._cached_purchase_info
+
+    def get_user_purchase_date(self, obj):
+        purchase_date = self._get_user_purchase_info(obj)
+        return purchase_date.isoformat() if purchase_date else None
+
+    def get_user_refund_deadline(self, obj):
+        purchase_date = self._get_user_purchase_info(obj)
+        if purchase_date:
+            deadline = purchase_date + datetime.timedelta(days=obj.refund_deadline_days)
+            return deadline.isoformat()
+        return None
+
+    def get_refund_deadline_date(self, obj):
+        return self.get_user_refund_deadline(obj)
+
+    def get_return_deadline(self, obj):
+        return self.get_user_refund_deadline(obj)
+
+    def get_is_eligible(self, obj):
+        purchase_date = self._get_user_purchase_info(obj)
+        if purchase_date:
+            if timezone.is_naive(purchase_date):
+                purchase_date = timezone.make_aware(purchase_date, timezone.get_current_timezone())
+            deadline = purchase_date + datetime.timedelta(days=obj.refund_deadline_days)
+            now = timezone.now()
+            if timezone.is_naive(deadline):
+                deadline = timezone.make_aware(deadline, timezone.get_current_timezone())
+            return now <= deadline
+        return None
 
 
 class RefundRequestCreateSerializer(serializers.Serializer):

@@ -108,7 +108,7 @@ CHANNEL_LAYERS = {
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
+        'ENGINE': env('DB_ENGINE', default='django.db.backends.postgresql'),
         'NAME': env('DB_NAME', default='orange71'),
         'USER': env('DB_USER', default='orange71'),
         'PASSWORD': env('DB_PASSWORD', default='orange71'),

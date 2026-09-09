@@ -1490,11 +1490,70 @@ class RingExchangeStripeWebhookAPIView(APIView):
 REFUND_TAG = "Refund"
 
 
+def get_user_ring_purchase_date(user, order_id=None):
+    """
+    Fetch the purchase date of the given authenticated user's ring purchase.
+    1. Checks WooCommerce API for user's orders if WooCommerce is configured.
+       - If order_id is provided, looks for that specific order.
+       - Otherwise, looks for orders and selects the most recent order.
+    2. If WooCommerce is not connected or no WooCommerce order found,
+       checks RefundRequest and RingExchangeRequest in DB for the user.
+    Returns timezone-aware datetime object or None if no purchase date found.
+    """
+    if not user or not user.is_authenticated:
+        return None
+
+    def _ensure_aware(dt):
+        if dt and timezone.is_naive(dt):
+            return timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
+
+    wc = get_wc_api()
+    if wc:
+        try:
+            orders_helper = CurrentUserOrdersAPIView()
+            user_orders = orders_helper._fetch_orders_for_email(wc, user.email)
+            if user_orders:
+                selected_order = None
+                if order_id:
+                    for o in user_orders:
+                        if str(o.get("id")) == str(order_id):
+                            selected_order = o
+                            break
+                if not selected_order:
+                    selected_order = user_orders[0]
+
+                if selected_order:
+                    date_str = selected_order.get("date_created")
+                    if date_str:
+                        from django.utils.dateparse import parse_datetime
+                        parsed_dt = parse_datetime(date_str)
+                        if parsed_dt:
+                            return _ensure_aware(parsed_dt)
+        except Exception:
+            pass
+
+    ref_req = RefundRequest.objects.filter(user=user).exclude(purchase_date__isnull=True).order_by("-purchase_date").first()
+    ex_req = RingExchangeRequest.objects.filter(user=user).exclude(purchase_date__isnull=True).order_by("-purchase_date").first()
+
+    dates = []
+    if ref_req and ref_req.purchase_date:
+        dates.append(_ensure_aware(ref_req.purchase_date))
+    if ex_req and ex_req.purchase_date:
+        dates.append(_ensure_aware(ex_req.purchase_date))
+
+    if dates:
+        return max(dates)
+
+    return None
+
+
 class RefundPolicyAPIView(APIView):
     """
     GET /api/auth/refund/policy/
 
-    Return active refund policy configuration (21-day deadline window, return shipping address, instructions).
+    Return active refund policy configuration (21-day deadline window, return shipping address, instructions)
+    and user's calculated refund deadline date.
 
     Response Example (200 OK):
     {
@@ -1503,7 +1562,12 @@ class RefundPolicyAPIView(APIView):
         "instructions": "To return your ring for a refund, please package the item securely...",
         "restocking_fee_percentage": "0.00",
         "currency": "usd",
-        "updated_at": "2026-09-01T12:00:00Z"
+        "updated_at": "2026-09-01T12:00:00Z",
+        "user_purchase_date": "2026-08-20T10:00:00Z",
+        "user_refund_deadline": "2026-09-10T10:00:00Z",
+        "refund_deadline_date": "2026-09-10T10:00:00Z",
+        "return_deadline": "2026-09-10T10:00:00Z",
+        "is_eligible": true
     }
     """
 
@@ -1514,7 +1578,7 @@ class RefundPolicyAPIView(APIView):
         summary="Get active refund policy",
         description=(
             "Returns the active refund policy details including return deadline window (default 21 days), "
-            "return shipping address, and instructions.\n\n"
+            "return shipping address, instructions, and user's calculated refund deadline date.\n\n"
             "**Response Example (200 OK)**:\n"
             "```json\n"
             "{\n"
@@ -1523,7 +1587,12 @@ class RefundPolicyAPIView(APIView):
             "  \"instructions\": \"To return your ring for a refund, please package the item securely in its original box and ship it to our returns department.\",\n"
             "  \"restocking_fee_percentage\": \"0.00\",\n"
             "  \"currency\": \"usd\",\n"
-            "  \"updated_at\": \"2026-09-01T12:00:00Z\"\n"
+            "  \"updated_at\": \"2026-09-01T12:00:00Z\",\n"
+            "  \"user_purchase_date\": \"2026-08-20T10:00:00Z\",\n"
+            "  \"user_refund_deadline\": \"2026-09-10T10:00:00Z\",\n"
+            "  \"refund_deadline_date\": \"2026-09-10T10:00:00Z\",\n"
+            "  \"return_deadline\": \"2026-09-10T10:00:00Z\",\n"
+            "  \"is_eligible\": true\n"
             "}\n"
             "```"
         ),
@@ -1531,7 +1600,7 @@ class RefundPolicyAPIView(APIView):
     )
     def get(self, request):
         policy = RefundPolicy.get_policy()
-        serializer = RefundPolicySerializer(policy)
+        serializer = RefundPolicySerializer(policy, context={'request': request})
         return Response(serializer.data)
 
 

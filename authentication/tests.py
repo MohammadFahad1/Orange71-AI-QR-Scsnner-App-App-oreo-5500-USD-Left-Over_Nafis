@@ -1,1 +1,117 @@
-from django.test import TestCase
+from datetime import timedelta
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from .models import RefundPolicy, RefundRequest, RingExchangeRequest
+
+User = get_user_model()
+
+
+class RefundPolicyAPITestCase(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="testuser@example.com",
+            name="Test User",
+            password="Password123!",
+        )
+        self.policy = RefundPolicy.get_policy()
+        self.policy.refund_deadline_days = 21
+        self.policy.save()
+
+    def test_refund_policy_unauthenticated(self):
+        url = "/api/auth/refund/policy/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_refund_policy_no_purchase(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/refund/policy/"
+        with patch("authentication.views.get_wc_api", return_value=None):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["refund_deadline_days"], 21)
+        self.assertIn("return_shipping_address", data)
+        self.assertIn("instructions", data)
+        self.assertIn("restocking_fee_percentage", data)
+        self.assertIn("currency", data)
+        self.assertIn("updated_at", data)
+        self.assertIsNone(data["user_purchase_date"])
+        self.assertIsNone(data["user_refund_deadline"])
+        self.assertIsNone(data["refund_deadline_date"])
+        self.assertIsNone(data["return_deadline"])
+        self.assertIsNone(data["is_eligible"])
+
+    def test_refund_policy_with_db_purchase(self):
+        self.client.force_authenticate(user=self.user)
+        purchase_date = timezone.now() - timedelta(days=5)
+
+        RefundRequest.objects.create(
+            user=self.user,
+            order_id="1001",
+            item_name="Amore Ring",
+            reason="Size mismatch",
+            purchase_date=purchase_date,
+            original_price=5000,
+            refund_amount=5000,
+            return_deadline=purchase_date + timedelta(days=21),
+        )
+
+        url = "/api/auth/refund/policy/"
+        with patch("authentication.views.get_wc_api", return_value=None):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        expected_deadline = (purchase_date + timedelta(days=21)).isoformat()
+        self.assertEqual(data["user_purchase_date"], purchase_date.isoformat())
+        self.assertEqual(data["user_refund_deadline"], expected_deadline)
+        self.assertEqual(data["refund_deadline_date"], expected_deadline)
+        self.assertEqual(data["return_deadline"], expected_deadline)
+        self.assertTrue(data["is_eligible"])
+
+    def test_refund_policy_with_woocommerce_purchase(self):
+        self.client.force_authenticate(user=self.user)
+        order_date_str = "2026-08-20T10:00:00Z"
+
+        mock_wc = patch("authentication.views.get_wc_api")
+        mock_fetch = patch(
+            "authentication.views.CurrentUserOrdersAPIView._fetch_orders_for_email",
+            return_value=[{"id": 999, "date_created": order_date_str}],
+        )
+
+        url = "/api/auth/refund/policy/"
+        with mock_wc as m_wc, mock_fetch:
+            m_wc.return_value = True
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertTrue(data["user_purchase_date"].startswith("2026-08-20T10:00:00"))
+        self.assertTrue(data["user_refund_deadline"].startswith("2026-09-10T10:00:00"))
+        self.assertTrue(data["refund_deadline_date"].startswith("2026-09-10T10:00:00"))
+
+    def test_refund_policy_with_naive_date(self):
+        self.client.force_authenticate(user=self.user)
+        naive_order_date_str = "2026-08-20 10:00:00"
+
+        mock_wc = patch("authentication.views.get_wc_api")
+        mock_fetch = patch(
+            "authentication.views.CurrentUserOrdersAPIView._fetch_orders_for_email",
+            return_value=[{"id": 999, "date_created": naive_order_date_str}],
+        )
+
+        url = "/api/auth/refund/policy/"
+        with mock_wc as m_wc, mock_fetch:
+            m_wc.return_value = True
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertIsNotNone(data["user_refund_deadline"])
+        self.assertTrue(data["user_purchase_date"].startswith("2026-08-20T10:00:00"))

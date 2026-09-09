@@ -115,3 +115,61 @@ class RefundPolicyAPITestCase(APITestCase):
         data = response.json()
         self.assertIsNotNone(data["user_refund_deadline"])
         self.assertTrue(data["user_purchase_date"].startswith("2026-08-20T10:00:00"))
+
+
+class RingExchangePolicyAPITestCase(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="exchange_user@example.com",
+            name="Exchange User",
+            password="Password123!",
+        )
+
+    def test_ring_exchange_policy_unauthenticated(self):
+        url = "/api/auth/ring-exchange/policy/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_ring_exchange_policy_no_purchase(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/ring-exchange/policy/"
+        with patch("authentication.views.get_wc_api", return_value=None):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["free_exchange_days"], 14)
+        self.assertIn("charge_type", data)
+        self.assertIn("fixed_fee_amount", data)
+        self.assertIn("fee_percentage", data)
+        self.assertIn("shipping_cost", data)
+        self.assertIsNone(data["user_purchase_date"])
+        self.assertIsNone(data["user_free_exchange_deadline"])
+        self.assertIsNone(data["free_exchange_deadline_date"])
+        self.assertIsNone(data["exchange_deadline_date"])
+        self.assertIsNone(data["is_within_free_window"])
+
+    def test_ring_exchange_policy_with_woocommerce_purchase(self):
+        self.client.force_authenticate(user=self.user)
+        purchase_dt = timezone.now() - timedelta(days=2)
+        order_date_str = purchase_dt.isoformat()
+
+        mock_wc = patch("authentication.views.get_wc_api")
+        mock_fetch = patch(
+            "authentication.views.CurrentUserOrdersAPIView._fetch_orders_for_email",
+            return_value=[{"id": 888, "date_created": order_date_str}],
+        )
+
+        url = "/api/auth/ring-exchange/policy/"
+        with mock_wc as m_wc, mock_fetch:
+            m_wc.return_value = True
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        expected_deadline = (purchase_dt + timedelta(days=14)).isoformat()
+        self.assertEqual(data["user_purchase_date"], purchase_dt.isoformat())
+        self.assertEqual(data["user_free_exchange_deadline"], expected_deadline)
+        self.assertEqual(data["free_exchange_deadline_date"], expected_deadline)
+        self.assertEqual(data["exchange_deadline_date"], expected_deadline)
+        self.assertTrue(data["is_within_free_window"])

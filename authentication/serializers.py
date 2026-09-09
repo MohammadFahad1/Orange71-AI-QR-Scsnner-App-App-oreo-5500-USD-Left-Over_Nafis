@@ -125,6 +125,12 @@ class UserUpdateSerializer(serializers.Serializer):
 
 
 class RingExchangePolicySerializer(serializers.ModelSerializer):
+    user_purchase_date = serializers.SerializerMethodField()
+    user_free_exchange_deadline = serializers.SerializerMethodField()
+    free_exchange_deadline_date = serializers.SerializerMethodField()
+    exchange_deadline_date = serializers.SerializerMethodField()
+    is_within_free_window = serializers.SerializerMethodField()
+
     class Meta:
         model = RingExchangePolicy
         fields = (
@@ -135,7 +141,54 @@ class RingExchangePolicySerializer(serializers.ModelSerializer):
             'shipping_cost',
             'currency',
             'updated_at',
+            'user_purchase_date',
+            'user_free_exchange_deadline',
+            'free_exchange_deadline_date',
+            'exchange_deadline_date',
+            'is_within_free_window',
         )
+
+    def _get_user_purchase_info(self, obj):
+        if not hasattr(self, '_cached_purchase_info'):
+            request = self.context.get('request')
+            if request and getattr(request, 'user', None) and request.user.is_authenticated:
+                from .views import get_user_ring_purchase_date
+                order_id = request.query_params.get('order_id') if hasattr(request, 'query_params') else None
+                self._cached_purchase_info = get_user_ring_purchase_date(request.user, order_id=order_id)
+            else:
+                self._cached_purchase_info = None
+        return self._cached_purchase_info
+
+    def get_user_purchase_date(self, obj):
+        purchase_date = self._get_user_purchase_info(obj)
+        return purchase_date.isoformat() if purchase_date else None
+
+    def get_user_free_exchange_deadline(self, obj):
+        purchase_date = self._get_user_purchase_info(obj)
+        if purchase_date:
+            if timezone.is_naive(purchase_date):
+                purchase_date = timezone.make_aware(purchase_date, timezone.get_current_timezone())
+            deadline = purchase_date + datetime.timedelta(days=obj.free_exchange_days)
+            return deadline.isoformat()
+        return None
+
+    def get_free_exchange_deadline_date(self, obj):
+        return self.get_user_free_exchange_deadline(obj)
+
+    def get_exchange_deadline_date(self, obj):
+        return self.get_user_free_exchange_deadline(obj)
+
+    def get_is_within_free_window(self, obj):
+        purchase_date = self._get_user_purchase_info(obj)
+        if purchase_date:
+            if timezone.is_naive(purchase_date):
+                purchase_date = timezone.make_aware(purchase_date, timezone.get_current_timezone())
+            deadline = purchase_date + datetime.timedelta(days=obj.free_exchange_days)
+            now = timezone.now()
+            if timezone.is_naive(deadline):
+                deadline = timezone.make_aware(deadline, timezone.get_current_timezone())
+            return now <= deadline
+        return None
 
 
 class RingExchangeRequestCreateSerializer(serializers.Serializer):

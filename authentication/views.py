@@ -989,7 +989,7 @@ class RingExchangePolicyAPIView(APIView):
     """
     GET /api/auth/ring-exchange/policy/
 
-    Return current dynamic ring exchange policy.
+    Return current dynamic ring exchange policy and user's calculated free exchange deadline date.
 
     Response Example (200 OK):
     {
@@ -999,7 +999,12 @@ class RingExchangePolicyAPIView(APIView):
         "fee_percentage": "20.00",
         "shipping_cost": 500,
         "currency": "usd",
-        "updated_at": "2026-09-01T12:00:00Z"
+        "updated_at": "2026-09-01T12:00:00Z",
+        "user_purchase_date": "2026-08-20T10:00:00Z",
+        "user_free_exchange_deadline": "2026-09-03T10:00:00Z",
+        "free_exchange_deadline_date": "2026-09-03T10:00:00Z",
+        "exchange_deadline_date": "2026-09-03T10:00:00Z",
+        "is_within_free_window": true
     }
     """
 
@@ -1009,7 +1014,8 @@ class RingExchangePolicyAPIView(APIView):
         tags=[RING_EXCHANGE_TAG],
         summary="Get active ring exchange policy",
         description=(
-            "Returns the current dynamic ring exchange policy (free exchange days window, fee rules, shipping cost).\n\n"
+            "Returns the current dynamic ring exchange policy (free exchange days window, fee rules, shipping cost) "
+            "and user's calculated free exchange deadline date.\n\n"
             "**Response Example (200 OK)**:\n"
             "```json\n"
             "{\n"
@@ -1019,7 +1025,12 @@ class RingExchangePolicyAPIView(APIView):
             "  \"fee_percentage\": \"20.00\",\n"
             "  \"shipping_cost\": 500,\n"
             "  \"currency\": \"usd\",\n"
-            "  \"updated_at\": \"2026-09-01T12:00:00Z\"\n"
+            "  \"updated_at\": \"2026-09-01T12:00:00Z\",\n"
+            "  \"user_purchase_date\": \"2026-08-20T10:00:00Z\",\n"
+            "  \"user_free_exchange_deadline\": \"2026-09-03T10:00:00Z\",\n"
+            "  \"free_exchange_deadline_date\": \"2026-09-03T10:00:00Z\",\n"
+            "  \"exchange_deadline_date\": \"2026-09-03T10:00:00Z\",\n"
+            "  \"is_within_free_window\": true\n"
             "}\n"
             "```"
         ),
@@ -1027,7 +1038,7 @@ class RingExchangePolicyAPIView(APIView):
     )
     def get(self, request):
         policy = RingExchangePolicy.get_policy()
-        serializer = RingExchangePolicySerializer(policy)
+        serializer = RingExchangePolicySerializer(policy, context={'request': request})
         return Response(serializer.data)
 
 

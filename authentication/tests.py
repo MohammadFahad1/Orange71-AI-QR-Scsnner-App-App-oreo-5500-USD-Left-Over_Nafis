@@ -289,4 +289,81 @@ class FloatOriginalPriceValidationTestCase(APITestCase):
         self.assertEqual(data["refund_amount"], 29.99)
 
 
+class MembershipStatusAPITestCase(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="member@example.com",
+            name="Member User",
+            password="Password123!",
+        )
+
+    def test_membership_status_unauthenticated(self):
+        url = "/api/auth/membership-status/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_membership_status_wc_not_configured(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/membership-status/"
+        with patch("authentication.views.get_wc_api", return_value=None):
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    def test_membership_status_with_orders(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/membership-status/"
+        mock_wc = patch("authentication.views.get_wc_api")
+        mock_fetch = patch(
+            "authentication.views.CurrentUserOrdersAPIView._fetch_orders_for_email",
+            return_value=[{
+                "id": 1230,
+                "status": "processing",
+                "date_created": "2026-09-05T13:36:25",
+                "total": "29.99",
+                "currency": "USD",
+                "line_items": [{
+                    "id": 14,
+                    "product_id": 165,
+                    "name": "Wingman - Ring Sizer",
+                    "price": "29.99",
+                    "total": "29.99"
+                }]
+            }],
+        )
+
+        with mock_wc as m_wc, mock_fetch:
+            m_wc.return_value = True
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["id"], 1230)
+        self.assertEqual(data[0]["membership_type"], "member")
+        self.assertEqual(data[0]["membersip_type"], "member")
+        self.assertIn("member_since", data[0])
+
+    def test_membership_status_no_orders_fallback(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/membership-status/"
+        mock_wc = patch("authentication.views.get_wc_api")
+        mock_fetch = patch(
+            "authentication.views.CurrentUserOrdersAPIView._fetch_orders_for_email",
+            return_value=[],
+        )
+
+        with mock_wc as m_wc, mock_fetch:
+            m_wc.return_value = True
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["id"], 0)
+        self.assertEqual(data[0]["status"], "active")
+        self.assertEqual(data[0]["membership_type"], "member")
+        self.assertEqual(data[0]["membersip_type"], "member")
+
+
+
 

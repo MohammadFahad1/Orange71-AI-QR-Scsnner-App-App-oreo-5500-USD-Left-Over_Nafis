@@ -546,6 +546,7 @@ class CurrentUserOrdersAPIView(APIView):
             "date_created": "2026-08-20T10:00:00Z",
             "total": "99.00",
             "currency": "USD",
+            "membership_type": "member",
             "membersip_type": "member",
             "member_since": "2026-05-22T03:07:33Z",
             "items": [
@@ -578,6 +579,7 @@ class CurrentUserOrdersAPIView(APIView):
             "    \"date_created\": \"2026-08-20T10:00:00Z\",\n"
             "    \"total\": \"99.00\",\n"
             "    \"currency\": \"USD\",\n"
+            "    \"membership_type\": \"member\",\n"
             "    \"membersip_type\": \"member\",\n"
             "    \"member_since\": \"2026-05-22T03:07:33Z\",\n"
             "    \"items\": [\n"
@@ -638,6 +640,20 @@ class CurrentUserOrdersAPIView(APIView):
                 "total": str(o.get("total") or "0"),
                 "currency": o.get("currency", "USD"),
                 "items": items,
+                "membership_type": request.user.account_type,
+                "membersip_type": request.user.account_type,
+                "member_since": request.user.date_joined,
+            })
+
+        if not simplified:
+            simplified.append({
+                "id": 0,
+                "status": "active",
+                "date_created": request.user.date_joined.isoformat() if hasattr(request.user.date_joined, "isoformat") else str(request.user.date_joined),
+                "total": "0.00",
+                "currency": "USD",
+                "items": [],
+                "membership_type": request.user.account_type,
                 "membersip_type": request.user.account_type,
                 "member_since": request.user.date_joined,
             })

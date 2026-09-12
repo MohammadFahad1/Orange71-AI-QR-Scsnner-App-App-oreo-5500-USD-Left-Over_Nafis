@@ -173,3 +173,120 @@ class RingExchangePolicyAPITestCase(APITestCase):
         self.assertEqual(data["free_exchange_deadline_date"], expected_deadline)
         self.assertEqual(data["exchange_deadline_date"], expected_deadline)
         self.assertTrue(data["is_within_free_window"])
+
+
+class FloatOriginalPriceValidationTestCase(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="float_test@example.com",
+            name="Float Test User",
+            password="Password123!",
+        )
+
+    def test_refund_request_with_float_original_price(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/refund/"
+        payload = {
+            "order_id": "9999",
+            "item_name": "Silver Ring",
+            "reason": "Wrong size",
+            "original_price": 99.99,
+        }
+        with patch("authentication.views.get_wc_api", return_value=None):
+            response = self.client.post(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()
+        self.assertEqual(data["original_price"], 99.99)
+
+    def test_ring_exchange_request_with_float_original_price(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/ring-exchange/"
+        payload = {
+            "order_id": "8888",
+            "original_item_name": "Gold Ring",
+            "original_size": "7",
+            "desired_size": "8",
+            "is_damaged": False,
+            "original_price": 149.50,
+        }
+        with patch("authentication.views.get_wc_api", return_value=None):
+            response = self.client.post(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()
+        self.assertEqual(data["original_price"], 149.50)
+
+    def test_refund_request_with_naive_purchase_date(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/refund/"
+        payload = {
+            "order_id": "9998",
+            "item_name": "Silver Ring",
+            "reason": "Defective",
+            "purchase_date": "2026-08-20T10:00:00",
+            "original_price": 50.00,
+        }
+        with patch("authentication.views.get_wc_api", return_value=None):
+            response = self.client.post(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()
+        self.assertEqual(data["original_price"], 50.00)
+
+    def test_ring_exchange_request_with_naive_purchase_date(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/ring-exchange/"
+        payload = {
+            "order_id": "8887",
+            "original_item_name": "Gold Ring",
+            "original_size": "7",
+            "desired_size": "8",
+            "is_damaged": False,
+            "purchase_date": "2026-08-20T10:00:00",
+            "original_price": 100.00,
+        }
+        with patch("authentication.views.get_wc_api", return_value=None):
+            response = self.client.post(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()
+        self.assertEqual(data["original_price"], 100.00)
+
+    def test_refund_request_woocommerce_price_preservation(self):
+        self.client.force_authenticate(user=self.user)
+        url = "/api/auth/refund/"
+        payload = {
+            "order_id": "1230",
+            "item_name": "Wingman - Ring Sizer",
+            "item_size": "ring-sizer",
+            "reason": "test",
+            "purchase_date": "2026-09-12T04:50:08.101Z",
+            "original_price": 29.99,
+        }
+
+        mock_wc = patch("authentication.views.get_wc_api")
+        mock_fetch = patch(
+            "authentication.views.CurrentUserOrdersAPIView._fetch_orders_for_email",
+            return_value=[{
+                "id": 1230,
+                "date_created": "2026-09-05T13:36:25Z",
+                "line_items": [{
+                    "name": "Wingman - Ring Sizer",
+                    "price": "29.99",
+                    "total": "29.99"
+                }]
+            }],
+        )
+
+        with mock_wc as m_wc, mock_fetch:
+            m_wc.return_value = True
+            response = self.client.post(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()
+        self.assertEqual(data["original_price"], 29.99)
+        self.assertEqual(data["refund_amount"], 29.99)
+
+
+

@@ -1212,20 +1212,21 @@ class RingExchangeAPIView(APIView):
             purchase_date = parsed_dt or data.get("purchase_date") or timezone.now()
 
             line_items = wc_order.get("line_items") or []
-            item_price_cents = 0
+            item_price = 0.0
             for li in line_items:
                 if data["original_item_name"].strip().lower() in (li.get("name") or "").strip().lower():
-                    price_val = float(li.get("price") or li.get("total") or 0)
-                    item_price_cents = int(price_val * 100)
+                    item_price = float(li.get("price") or li.get("total") or 0)
                     break
-            if item_price_cents == 0 and line_items:
-                price_val = float(line_items[0].get("price") or line_items[0].get("total") or 0)
-                item_price_cents = int(price_val * 100)
+            if item_price == 0.0 and line_items:
+                item_price = float(line_items[0].get("price") or line_items[0].get("total") or 0)
 
-            original_price = item_price_cents if item_price_cents > 0 else (data.get("original_price") or 0)
+            original_price = item_price if item_price > 0 else (data.get("original_price") or 0.0)
         else:
             purchase_date = data.get("purchase_date") or timezone.now()
-            original_price = data.get("original_price") or 0
+            original_price = data.get("original_price") or 0.0
+
+        if purchase_date and timezone.is_naive(purchase_date):
+            purchase_date = timezone.make_aware(purchase_date, timezone.get_current_timezone())
 
         fee_calc = RingExchangeRequest.calculate_exchange_fee(
             policy=policy,
@@ -1765,20 +1766,21 @@ class RefundAPIView(APIView):
             purchase_date = parsed_dt or data.get("purchase_date") or timezone.now()
 
             line_items = wc_order.get("line_items") or []
-            item_price_cents = 0
+            item_price = 0.0
             for li in line_items:
                 if data["item_name"].strip().lower() in (li.get("name") or "").strip().lower():
-                    price_val = float(li.get("price") or li.get("total") or 0)
-                    item_price_cents = int(price_val * 100)
+                    item_price = float(li.get("price") or li.get("total") or 0)
                     break
-            if item_price_cents == 0 and line_items:
-                price_val = float(line_items[0].get("price") or line_items[0].get("total") or 0)
-                item_price_cents = int(price_val * 100)
+            if item_price == 0.0 and line_items:
+                item_price = float(line_items[0].get("price") or line_items[0].get("total") or 0)
 
-            original_price = item_price_cents if item_price_cents > 0 else (data.get("original_price") or 0)
+            original_price = item_price if item_price > 0 else (data.get("original_price") or 0.0)
         else:
             purchase_date = data.get("purchase_date") or timezone.now()
-            original_price = data.get("original_price") or 0
+            original_price = data.get("original_price") or 0.0
+
+        if purchase_date and timezone.is_naive(purchase_date):
+            purchase_date = timezone.make_aware(purchase_date, timezone.get_current_timezone())
 
         calc = RefundRequest.calculate_refund(
             policy=policy,

@@ -231,9 +231,9 @@ class RingExchangeRequest(models.Model):
         help_text="Check if the ring is broken or damaged.",
     )
     purchase_date = models.DateTimeField()
-    original_price = models.PositiveIntegerField(
+    original_price = models.FloatField(
         default=0,
-        help_text="Original item price in smallest currency unit (e.g. cents).",
+        help_text="Original item price.",
     )
     calculated_fee = models.PositiveIntegerField(
         default=0,
@@ -279,6 +279,8 @@ class RingExchangeRequest(models.Model):
     @classmethod
     def calculate_exchange_fee(cls, policy, purchase_date, is_damaged, original_price_cents):
         from django.utils import timezone
+        if purchase_date and timezone.is_naive(purchase_date):
+            purchase_date = timezone.make_aware(purchase_date, timezone.get_current_timezone())
         now = timezone.now()
         days_passed = (now - purchase_date).days if purchase_date else 0
         within_free_window = days_passed <= policy.free_exchange_days
@@ -414,17 +416,19 @@ class RefundRequest(models.Model):
     def calculate_refund(cls, policy, purchase_date, original_price_cents):
         from datetime import timedelta
         from django.utils import timezone
+        if purchase_date and timezone.is_naive(purchase_date):
+            purchase_date = timezone.make_aware(purchase_date, timezone.get_current_timezone())
         now = timezone.now()
         deadline = purchase_date + timedelta(days=policy.refund_deadline_days)
         is_eligible = now <= deadline
 
-        restocking_fee = int(original_price_cents * (float(policy.restocking_fee_percentage) / 100.0))
-        refund_amount = max(0, original_price_cents - restocking_fee)
+        restocking_fee = round(float(original_price_cents) * (float(policy.restocking_fee_percentage) / 100.0), 2)
+        refund_amount = round(max(0.0, float(original_price_cents) - restocking_fee), 2)
 
         return {
             "is_eligible": is_eligible,
             "return_deadline": deadline,
-            "original_price": original_price_cents,
+            "original_price": float(original_price_cents),
             "restocking_fee": restocking_fee,
             "refund_amount": refund_amount,
         }

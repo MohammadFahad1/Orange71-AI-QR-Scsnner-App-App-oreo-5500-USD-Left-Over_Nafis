@@ -198,11 +198,11 @@ class RingExchangeRequestCreateSerializer(serializers.Serializer):
     desired_size = serializers.CharField(max_length=50)
     is_damaged = serializers.BooleanField(default=False)
     purchase_date = serializers.DateTimeField(required=False, allow_null=True)
-    original_price = serializers.IntegerField(
+    original_price = serializers.FloatField(
         required=False,
         allow_null=True,
         min_value=0,
-        help_text="Original item price in smallest currency unit (e.g. cents). Optional if WooCommerce is connected.",
+        help_text="Original item price. Optional if WooCommerce is connected.",
     )
     success_url = serializers.URLField(required=False)
     cancel_url = serializers.URLField(required=False)
@@ -310,11 +310,11 @@ class RefundRequestCreateSerializer(serializers.Serializer):
     item_size = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
     reason = serializers.CharField()
     purchase_date = serializers.DateTimeField(required=False, allow_null=True)
-    original_price = serializers.IntegerField(
+    original_price = serializers.FloatField(
         required=False,
         allow_null=True,
         min_value=0,
-        help_text="Original purchase price in smallest currency unit (e.g. cents). Optional if WooCommerce is connected.",
+        help_text="Original purchase price. Optional if WooCommerce is connected.",
     )
 
 

@@ -383,11 +383,11 @@ class RefundRequest(models.Model):
     item_size = models.CharField(max_length=50, blank=True, null=True)
     reason = models.TextField()
     purchase_date = models.DateTimeField()
-    original_price = models.PositiveIntegerField(
+    original_price = models.FloatField(
         default=0,
         help_text="Original item purchase price in smallest currency unit (e.g. cents).",
     )
-    refund_amount = models.PositiveIntegerField(
+    refund_amount = models.FloatField(
         default=0,
         help_text="Eligible refund amount in cents.",
     )

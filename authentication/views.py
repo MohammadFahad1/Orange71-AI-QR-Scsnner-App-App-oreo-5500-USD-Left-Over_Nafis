@@ -1264,8 +1264,16 @@ class RingExchangeAPIView(APIView):
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
 
-            success_url = data.get("success_url") or "https://example.com/exchange/success"
-            cancel_url = data.get("cancel_url") or "https://example.com/exchange/cancel"
+            from django.urls import reverse
+            default_success_url = request.build_absolute_uri(reverse("stripe-success"))
+            default_cancel_url = request.build_absolute_uri(reverse("stripe-cancel"))
+
+            raw_success_url = data.get("success_url") or default_success_url
+            raw_cancel_url = data.get("cancel_url") or default_cancel_url
+
+            join_char = "&" if "?" in raw_success_url else "?"
+            success_url = f"{raw_success_url}{join_char}session_id={{CHECKOUT_SESSION_ID}}"
+            cancel_url = raw_cancel_url
 
             line_items = []
             if fee_calc["fee"] > 0:
@@ -1296,7 +1304,7 @@ class RingExchangeAPIView(APIView):
                     payment_method_types=["card"],
                     line_items=line_items,
                     mode="payment",
-                    success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
+                    success_url=success_url,
                     cancel_url=cancel_url,
                     client_reference_id=str(request.user.id),
                     metadata={

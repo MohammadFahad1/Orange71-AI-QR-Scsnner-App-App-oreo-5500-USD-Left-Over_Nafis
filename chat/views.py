@@ -15,6 +15,7 @@ from .serializers import (
     UserConnectionSerializer,
     CreditPackageSerializer,
     CreditPurchaseSerializer,
+    CreditPurchaseCreateSerializer,
 )
 
 User = get_user_model()
@@ -352,18 +353,19 @@ class CreditPurchaseCreateAPIView(APIView):
         tags=[CHAT_TAG],
         summary='Purchase a credit package',
         description='Creates a Stripe Checkout Session for the selected credit package. Returns the session URL for the mobile app to open.',
-        request=serializers.Serializer,
+        request=CreditPurchaseCreateSerializer,
         responses=CreditPurchaseSerializer,
     )
     def post(self, request):
         from django.conf import settings
+        from django.urls import reverse
         import stripe
-        from .serializers import CreditPackageSerializer
 
-        package_id = request.data.get('package_id')
-        if package_id is None:
-            return Response({'detail': 'package_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = CreditPurchaseCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        package_id = serializer.validated_data.get('package_id')
         try:
             package = CreditPackage.objects.get(pk=package_id, is_active=True)
         except CreditPackage.DoesNotExist:
@@ -373,8 +375,15 @@ class CreditPurchaseCreateAPIView(APIView):
         if not stripe.api_key:
             return Response({'detail': 'Stripe is not configured.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        success_url = request.data.get('success_url') or 'https://example.com/success'
-        cancel_url = request.data.get('cancel_url') or 'https://example.com/cancel'
+        default_success_url = request.build_absolute_uri(reverse('stripe-success'))
+        default_cancel_url = request.build_absolute_uri(reverse('stripe-cancel'))
+
+        raw_success_url = serializer.validated_data.get('success_url') or default_success_url
+        raw_cancel_url = serializer.validated_data.get('cancel_url') or default_cancel_url
+
+        join_char = '&' if '?' in raw_success_url else '?'
+        success_url = f"{raw_success_url}{join_char}session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = raw_cancel_url
 
         try:
             session = stripe.checkout.Session.create(
@@ -392,10 +401,11 @@ class CreditPurchaseCreateAPIView(APIView):
                     },
                 ],
                 mode='payment',
-                success_url=success_url + '?session_id={CHECKOUT_SESSION_ID}',
+                success_url=success_url,
                 cancel_url=cancel_url,
                 client_reference_id=str(request.user.id),
                 metadata={
+                    'type': 'credit_purchase',
                     'package_id': str(package.id),
                     'user_id': str(request.user.id),
                 },
@@ -408,15 +418,15 @@ class CreditPurchaseCreateAPIView(APIView):
             package=package,
             stripe_session_id=session.id,
             credits_amount=package.credits_amount,
-            amount_paid=package.price,
+            amount_paid=int(package.price * 100),
             currency=package.currency,
         )
 
-        serializer = CreditPurchaseSerializer(purchase, context={'request': request})
+        res_serializer = CreditPurchaseSerializer(purchase, context={'request': request})
         return Response({
             'session_id': session.id,
             'url': session.url,
-            'purchase': serializer.data,
+            'purchase': res_serializer.data,
         }, status=status.HTTP_201_CREATED)
 
 

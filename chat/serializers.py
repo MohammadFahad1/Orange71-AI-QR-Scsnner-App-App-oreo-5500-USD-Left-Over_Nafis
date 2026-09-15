@@ -98,6 +98,12 @@ class CreditPackageSerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'credits_amount', 'price', 'currency', 'is_active', 'created_at')
 
 
+class CreditPurchaseCreateSerializer(serializers.Serializer):
+    package_id = serializers.IntegerField(required=True, help_text="ID of the credit package to purchase")
+    success_url = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text="Deep link or web URL to redirect on success (e.g. orange://payment/success)")
+    cancel_url = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text="Deep link or web URL to redirect on cancel (e.g. orange://payment/cancel)")
+
+
 class CreditPurchaseSerializer(serializers.ModelSerializer):
     package = CreditPackageSerializer(read_only=True)
 

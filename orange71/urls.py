@@ -20,8 +20,11 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from django.conf import settings
 from django.conf.urls.static import static
 
+from orange71.webhooks import UnifiedStripeWebhookAPIView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/stripe/webhook/', UnifiedStripeWebhookAPIView.as_view(), name='stripe-webhook'),
     path('api/auth/', include('authentication.urls')),
     path('api/chat/', include('chat.urls')),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

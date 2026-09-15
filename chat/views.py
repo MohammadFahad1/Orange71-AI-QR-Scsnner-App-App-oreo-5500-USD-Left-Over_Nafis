@@ -435,62 +435,7 @@ class CreditPurchaseHistoryAPIView(APIView):
         return Response(serializer.data)
 
 
-class StripeWebhookAPIView(APIView):
-    permission_classes = [AllowAny]
-
-    @extend_schema(
-        tags=[CHAT_TAG],
-        summary='Stripe webhook',
-        description='Handles Stripe webhook events to confirm credit purchases.',
-        request=None,
-        responses=None,
-    )
-    def post(self, request):
-        from django.conf import settings
-        import stripe
-
-        stripe.api_key = settings.STRIPE_SECRET_KEY
-        webhook_secret = settings.STRIPE_WEBHOOK_SECRET
-        payload = request.body
-        sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
-
-        if not webhook_secret:
-            return Response({'detail': 'Webhook secret not configured.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-
-        try:
-            event = stripe.Webhook.construct_event(payload=payload, sig_header=sig_header, secret=webhook_secret)
-        except ValueError:
-            return Response({'detail': 'Invalid payload.'}, status=status.HTTP_400_BAD_REQUEST)
-        except stripe.error.SignatureVerificationError:
-            return Response({'detail': 'Invalid signature.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        event_type = event.get('type')
-        data_object = event.get('data', {}).get('object', {})
-
-        if event_type == 'checkout.session.completed':
-            session_id = data_object.get('id')
-            payment_intent = data_object.get('payment_intent')
-            if not session_id:
-                return Response({'detail': 'Missing session id.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                purchase = CreditPurchase.objects.select_related('user', 'package').get(stripe_session_id=session_id)
-            except CreditPurchase.DoesNotExist:
-                return Response({'detail': 'Purchase not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-            if purchase.status == CreditPurchase.STATUS_COMPLETED:
-                return Response({'detail': 'Already completed.'}, status=status.HTTP_200_OK)
-
-            purchase.status = CreditPurchase.STATUS_COMPLETED
-            purchase.stripe_payment_intent_id = payment_intent
-            purchase.completed_at = timezone.now()
-            purchase.save(update_fields=['status', 'stripe_payment_intent_id', 'completed_at'])
-
-            if purchase.user and purchase.package:
-                balance = CreditBalance.get_or_create_for_user(purchase.user)
-                balance.add(purchase.credits_amount)
-
-        return Response({'detail': 'ok'}, status=status.HTTP_200_OK)
+from orange71.webhooks import UnifiedStripeWebhookAPIView as StripeWebhookAPIView
 
 
 class StripeSuccessAPIView(APIView):

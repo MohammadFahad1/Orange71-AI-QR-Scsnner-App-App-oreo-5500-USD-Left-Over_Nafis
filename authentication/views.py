@@ -1447,72 +1447,7 @@ class RingExchangeDetailAPIView(APIView):
         return Response(res_serializer.data)
 
 
-class RingExchangeStripeWebhookAPIView(APIView):
-    """
-    POST /api/auth/ring-exchange/webhook/
-
-    Processes Stripe webhook events for ring exchange payments.
-
-    Response Example (200 OK):
-    {
-        "detail": "ok"
-    }
-    """
-
-    permission_classes = [AllowAny]
-
-    @extend_schema(
-        tags=[RING_EXCHANGE_TAG],
-        summary="Ring Exchange Stripe webhook callback",
-        description="Processes Stripe webhook events for ring exchange payments.",
-        request=None,
-        responses=None,
-    )
-    def post(self, request):
-        import stripe
-        stripe.api_key = settings.STRIPE_SECRET_KEY
-        webhook_secret = settings.STRIPE_WEBHOOK_SECRET
-        payload = request.body
-        sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
-
-        if not webhook_secret:
-            return Response(
-                {"detail": "Webhook secret not configured."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        try:
-            event = stripe.Webhook.construct_event(
-                payload=payload, sig_header=sig_header, secret=webhook_secret
-            )
-        except ValueError:
-            return Response({"detail": "Invalid payload."}, status=status.HTTP_400_BAD_REQUEST)
-        except stripe.error.SignatureVerificationError:
-            return Response({"detail": "Invalid signature."}, status=status.HTTP_400_BAD_REQUEST)
-
-        event_type = event.get("type")
-        data_object = event.get("data", {}).get("object", {})
-
-        if event_type == "checkout.session.completed":
-            session_id = data_object.get("id")
-            payment_intent = data_object.get("payment_intent")
-            if not session_id:
-                return Response({"detail": "Missing session id."}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                exchange = RingExchangeRequest.objects.get(stripe_session_id=session_id)
-            except RingExchangeRequest.DoesNotExist:
-                return Response({"detail": "Not a ring exchange session."}, status=status.HTTP_200_OK)
-
-            if exchange.payment_status == RingExchangeRequest.PAYMENT_PAID:
-                return Response({"detail": "Already completed."}, status=status.HTTP_200_OK)
-
-            exchange.payment_status = RingExchangeRequest.PAYMENT_PAID
-            exchange.status = RingExchangeRequest.STATUS_APPROVED
-            exchange.stripe_payment_intent_id = payment_intent
-            exchange.save(update_fields=["payment_status", "status", "stripe_payment_intent_id", "updated_at"])
-
-        return Response({"detail": "ok"}, status=status.HTTP_200_OK)
+from orange71.webhooks import UnifiedStripeWebhookAPIView as RingExchangeStripeWebhookAPIView
 
 
 REFUND_TAG = "Refund"

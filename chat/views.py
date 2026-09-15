@@ -386,7 +386,7 @@ class CreditPurchaseCreateAPIView(APIView):
                             'product_data': {
                                 'name': package.name,
                             },
-                            'unit_amount': package.price,
+                            'unit_amount': int(package.price * 100),
                         },
                         'quantity': 1,
                     },

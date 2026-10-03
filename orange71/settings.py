@@ -34,6 +34,25 @@ DEBUG = env.bool('DEBUG', default=True)
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1', '2.24.193.63', '10.10.13.43'])
 
+CSRF_TRUSTED_ORIGINS = env.list(
+    'CSRF_TRUSTED_ORIGINS',
+    default=[
+        'https://api.amorerings.com',
+        'http://api.amorerings.com',
+        'https://*.amorerings.com',
+        'https://amore-rings-backend-izynbw-b79086-2-24-193-63.sslip.io',
+        'http://amore-rings-backend-izynbw-b79086-2-24-193-63.sslip.io',
+        'http://localhost',
+        'http://localhost:8000',
+        'http://127.0.0.1',
+        'http://127.0.0.1:8000',
+        'http://2.24.193.63',
+        'https://2.24.193.63',
+    ],
+)
+
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 
 # Application definition
 

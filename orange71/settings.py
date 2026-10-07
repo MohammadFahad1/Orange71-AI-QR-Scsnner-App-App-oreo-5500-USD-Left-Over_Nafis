@@ -86,20 +86,180 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'orange71.urls'
 
+from django.urls import reverse_lazy
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'orange71.dashboard.dashboard_context_processor',
             ],
         },
     },
 ]
+
+UNFOLD = {
+    "SITE_TITLE": "AmoreRings Admin",
+    "SITE_HEADER": "AmoreRings Control Center",
+    "SITE_SYMBOL": "space_dashboard",
+    "SHOW_HISTORY": True,
+    "SHOW_LANGUAGES": False,
+    "DASHBOARD_CALLBACK": "orange71.dashboard.dashboard_callback",
+    "COLORS": {
+        "primary": {
+            "50": "255 241 242",
+            "100": "255 228 230",
+            "200": "254 205 211",
+            "300": "253 164 175",
+            "400": "251 113 133",
+            "500": "244 63 94",
+            "600": "225 29 72",
+            "700": "190 18 60",
+            "800": "159 18 57",
+            "900": "136 19 55",
+            "950": "76 5 25",
+        },
+    },
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": True,
+        "navigation": [
+            {
+                "title": "Core",
+                "separator": True,
+                "collapsible": False,
+                "items": [
+                    {
+                        "title": "Dashboard",
+                        "icon": "space_dashboard",
+                        "link": reverse_lazy("admin:index"),
+                    },
+                ],
+            },
+            {
+                "title": "Users & Support",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Users",
+                        "icon": "person",
+                        "link": reverse_lazy("admin:authentication_user_changelist"),
+                    },
+                    {
+                        "title": "Support Tickets",
+                        "icon": "help",
+                        "link": reverse_lazy("admin:authentication_support_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Ring Exchange & Refunds",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Ring Exchange Requests",
+                        "icon": "swap_horiz",
+                        "link": reverse_lazy("admin:authentication_ringexchangerequest_changelist"),
+                    },
+                    {
+                        "title": "Ring Exchange Policy",
+                        "icon": "gavel",
+                        "link": reverse_lazy("admin:authentication_ringexchangepolicy_changelist"),
+                    },
+                    {
+                        "title": "Refund Requests",
+                        "icon": "currency_exchange",
+                        "link": reverse_lazy("admin:authentication_refundrequest_changelist"),
+                    },
+                    {
+                        "title": "Refund Policy",
+                        "icon": "policy",
+                        "link": reverse_lazy("admin:authentication_refundpolicy_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Messaging & Connections",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Conversations",
+                        "icon": "chat",
+                        "link": reverse_lazy("admin:chat_conversation_changelist"),
+                    },
+                    {
+                        "title": "Messages",
+                        "icon": "message",
+                        "link": reverse_lazy("admin:chat_message_changelist"),
+                    },
+                    {
+                        "title": "User Connections",
+                        "icon": "diversity_3",
+                        "link": reverse_lazy("admin:chat_userconnection_changelist"),
+                    },
+                    {
+                        "title": "Blocked Users",
+                        "icon": "block",
+                        "link": reverse_lazy("admin:chat_block_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Credits & Payments",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Credit Packages",
+                        "icon": "inventory_2",
+                        "link": reverse_lazy("admin:chat_creditpackage_changelist"),
+                    },
+                    {
+                        "title": "Credit Purchases",
+                        "icon": "receipt_long",
+                        "link": reverse_lazy("admin:chat_creditpurchase_changelist"),
+                    },
+                    {
+                        "title": "User Credit Balances",
+                        "icon": "account_balance_wallet",
+                        "link": reverse_lazy("admin:chat_creditbalance_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Ambassador Program",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Ambassador Bookings",
+                        "icon": "event_available",
+                        "link": reverse_lazy("admin:authentication_ambassadorbooking_changelist"),
+                    },
+                    {
+                        "title": "Ambassador Slots",
+                        "icon": "schedule",
+                        "link": reverse_lazy("admin:authentication_ambassadorslot_changelist"),
+                    },
+                    {
+                        "title": "Special Events",
+                        "icon": "star",
+                        "link": reverse_lazy("admin:authentication_speacialevent_changelist"),
+                    },
+                ],
+            },
+        ],
+    },
+}
 
 WSGI_APPLICATION = 'orange71.wsgi.application'
 ASGI_APPLICATION = 'orange71.asgi.application'
@@ -219,8 +379,8 @@ SIMPLE_JWT = {
 }
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Orange71 API',
-    'DESCRIPTION': 'JWT authentication API documentation for Orange71.',
+    'TITLE': 'AmoreRings API',
+    'DESCRIPTION': 'JWT authentication API documentation for AmoreRings.',
     'VERSION': '1.0.0',
     'SORT_OPERATIONS': True,
     'COMPONENT_SPLIT_REQUEST': True,

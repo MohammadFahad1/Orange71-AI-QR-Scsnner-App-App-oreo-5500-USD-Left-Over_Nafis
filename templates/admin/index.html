@@ -1,0 +1,10 @@
+{% extends "unfold/layouts/base.html" %}
+{% load i18n static %}
+
+{% block title %}
+    {% trans "Dashboard" %} | {{ site_title|default:_("Django administration") }}
+{% endblock %}
+
+{% block content %}
+    {% include "unfold/helpers/dashboard.html" %}
+{% endblock %}

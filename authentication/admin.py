@@ -54,7 +54,7 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
     inlines = [AmbassadorBookingInline]
     model = User
     list_display = ('email', 'name', 'is_staff', 'is_active', 'otp')
-    list_filter = ('is_staff', 'is_active', 'groups')
+    list_filter = ('is_staff', 'is_active')
     search_fields = ('email', 'name')
     ordering = ('email',)
     fieldsets = (
@@ -66,8 +66,6 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
                     'is_active',
                     'is_staff',
                     'is_superuser',
-                    'groups',
-                    'user_permissions',
                 )
             },
         ),

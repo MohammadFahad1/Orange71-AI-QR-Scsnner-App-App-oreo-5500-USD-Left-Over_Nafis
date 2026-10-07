@@ -1,23 +1,25 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.utils import timezone
 from django.contrib.auth.models import Group
+from django.utils import timezone
+from unfold.admin import ModelAdmin, TabularInline
 
 from .models import (
     AmbassadorBooking,
     AmbassadorSlot,
+    RefundPolicy,
+    RefundRequest,
+    RingExchangePolicy,
+    RingExchangeRequest,
     SpeacialEvent,
     Support,
     User,
-    RingExchangePolicy,
-    RingExchangeRequest,
-    RefundPolicy,
-    RefundRequest,
 )
 
 admin.site.unregister(Group)
 
-class AmbassadorBookingInline(admin.TabularInline):
+
+class AmbassadorBookingInline(TabularInline):
     model = AmbassadorBooking
     max_num = 1
     can_delete = False
@@ -27,31 +29,31 @@ class AmbassadorBookingInline(admin.TabularInline):
 
 
 @admin.register(AmbassadorSlot)
-class AmbassadorSlotAdmin(admin.ModelAdmin):
+class AmbassadorSlotAdmin(ModelAdmin):
     list_display = ('start_time', 'end_time', 'is_available')
     ordering = ('start_time',)
 
 
 @admin.register(AmbassadorBooking)
-class AmbassadorBookingAdmin(admin.ModelAdmin):
+class AmbassadorBookingAdmin(ModelAdmin):
     list_display = ('user', 'slot', 'completed_at', 'ambassador_link')
     list_filter = ('completed_at',)
     list_editable = ('ambassador_link',)
     ordering = ('-created_at',)
     actions = ['mark_as_completed']
 
+    @admin.action(description='Mark selected bookings as completed')
     def mark_as_completed(self, request, queryset):
         for booking in queryset:
             booking.completed_at = timezone.now()
             booking.save(update_fields=['completed_at'])
-    mark_as_completed.short_description = 'Mark selected bookings as completed'
 
 
 @admin.register(User)
-class UserAdmin(BaseUserAdmin):
+class UserAdmin(BaseUserAdmin, ModelAdmin):
     inlines = [AmbassadorBookingInline]
     model = User
-    list_display = ('email', 'name', 'is_staff', 'is_active','otp')
+    list_display = ('email', 'name', 'is_staff', 'is_active', 'otp')
     list_filter = ('is_staff', 'is_active', 'groups')
     search_fields = ('email', 'name')
     ordering = ('email',)
@@ -83,24 +85,24 @@ class UserAdmin(BaseUserAdmin):
 
 
 @admin.register(SpeacialEvent)
-class SpeacialEventAdmin(admin.ModelAdmin):
-	list_display = ('special_event',)
+class SpeacialEventAdmin(ModelAdmin):
+    list_display = ('special_event',)
 
-	def has_add_permission(self, request):
-		if SpeacialEvent.objects.exists():
-			return False
-		return super().has_add_permission(request)
+    def has_add_permission(self, request):
+        if SpeacialEvent.objects.exists():
+            return False
+        return super().has_add_permission(request)
 
 
 @admin.register(Support)
-class SupportAdmin(admin.ModelAdmin):
-	list_display = ('full_name', 'email', 'created_at')
-	search_fields = ('full_name', 'email', 'how_can_i_help_you')
-	ordering = ('-created_at',)
+class SupportAdmin(ModelAdmin):
+    list_display = ('full_name', 'email', 'created_at')
+    search_fields = ('full_name', 'email', 'how_can_i_help_you')
+    ordering = ('-created_at',)
 
 
 @admin.register(RingExchangePolicy)
-class RingExchangePolicyAdmin(admin.ModelAdmin):
+class RingExchangePolicyAdmin(ModelAdmin):
     list_display = (
         'free_exchange_days',
         'charge_type',
@@ -118,7 +120,7 @@ class RingExchangePolicyAdmin(admin.ModelAdmin):
 
 
 @admin.register(RingExchangeRequest)
-class RingExchangeRequestAdmin(admin.ModelAdmin):
+class RingExchangeRequestAdmin(ModelAdmin):
     list_display = (
         'id',
         'user',
@@ -144,7 +146,7 @@ class RingExchangeRequestAdmin(admin.ModelAdmin):
 
 
 @admin.register(RefundPolicy)
-class RefundPolicyAdmin(admin.ModelAdmin):
+class RefundPolicyAdmin(ModelAdmin):
     list_display = (
         'refund_deadline_days',
         'restocking_fee_percentage',
@@ -159,7 +161,7 @@ class RefundPolicyAdmin(admin.ModelAdmin):
 
 
 @admin.register(RefundRequest)
-class RefundRequestAdmin(admin.ModelAdmin):
+class RefundRequestAdmin(ModelAdmin):
     list_display = (
         'id',
         'user',
@@ -179,5 +181,6 @@ class RefundRequestAdmin(admin.ModelAdmin):
     search_fields = ('user__email', 'order_id', 'item_name', 'user_tracking_number')
     list_editable = ('status',)
     ordering = ('-created_at',)
+
 
 
